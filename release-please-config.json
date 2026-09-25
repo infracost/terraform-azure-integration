@@ -1,0 +1,19 @@
+{
+  "release-type": "terraform-module",
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": false,
+  "pull-request-header": ":package: Release ready for review",
+  "changelog-sections": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug Fixes" },
+    { "type": "chore", "section": "Miscellaneous" },
+    { "type": "perf", "section": "Performance Improvements" },
+    { "type": "refactor", "section": "Code Refactoring" },
+    { "type": "docs", "section": "Documentation" }
+  ],
+  "packages": {
+    ".": {
+      "extra-files": ["version.tf"]
+    }
+  }
+}

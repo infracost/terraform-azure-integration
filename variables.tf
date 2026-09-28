@@ -24,3 +24,14 @@ variable "role_definition_names" {
   type        = list(string)
   default     = ["Reader", "Cost Management Reader", "Monitoring Reader"]
 }
+
+variable "service_principal_owners" {
+  description = "Object IDs of principals that own the Infracost service principal. Set this to the principal running Terraform when it only has Application.ReadWrite.OwnedBy. If null, the service principal has no owners."
+  type        = list(string)
+  default     = null
+
+  validation {
+    condition     = var.service_principal_owners == null || alltrue([for object_id in coalesce(var.service_principal_owners, []) : can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", object_id))])
+    error_message = "service_principal_owners must contain object ID GUIDs."
+  }
+}

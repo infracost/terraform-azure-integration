@@ -62,5 +62,5 @@ resource "azurerm_role_assignment" "infracost" {
   role_definition_name = each.value.role_definition_name
   principal_id         = azuread_service_principal.infracost.object_id
   principal_type       = "ServicePrincipal"
-  description          = "Infracost read-only access (module ${local.module_version})"
+  description          = "Infracost read-only access"
 }

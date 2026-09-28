@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/infracost/terraform-azure-integration/compare/v0.2.2...v0.3.0) (2026-09-28)
+
+
+### Features
+
+* add service_principal_owners variable ([#9](https://github.com/infracost/terraform-azure-integration/issues/9)) ([681dc00](https://github.com/infracost/terraform-azure-integration/commit/681dc0096f346e084925c8409346174130d8b731))
+
 ## [0.2.2](https://github.com/infracost/terraform-azure-integration/compare/v0.2.1...v0.2.2) (2026-09-28)
 
 

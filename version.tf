@@ -2,5 +2,5 @@
 // creates, so Infracost can detect which module version provisioned the role.
 // Bumped automatically by release-please on each release.
 locals {
-  module_version = "0.2.2" # x-release-please-version
+  module_version = "0.3.0" # x-release-please-version
 }

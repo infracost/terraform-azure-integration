@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/infracost/terraform-azure-integration/compare/v0.2.0...v0.2.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* show service principal in enterprise applications ([#5](https://github.com/infracost/terraform-azure-integration/issues/5)) ([1246830](https://github.com/infracost/terraform-azure-integration/commit/12468309809222477cd170765bcb159e8bef4899))
+
 ## [0.2.0](https://github.com/infracost/terraform-azure-integration/compare/v0.1.0...v0.2.0) (2026-09-25)
 
 

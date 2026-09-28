@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/infracost/terraform-azure-integration/compare/v0.2.1...v0.2.2) (2026-09-28)
+
+
+### Bug Fixes
+
+* stop replacing role assignments on module version bumps ([#7](https://github.com/infracost/terraform-azure-integration/issues/7)) ([336e718](https://github.com/infracost/terraform-azure-integration/commit/336e718e011476f2dc753eab7688b5194ba2a185))
+
 ## [0.2.1](https://github.com/infracost/terraform-azure-integration/compare/v0.2.0...v0.2.1) (2026-09-28)
 
 

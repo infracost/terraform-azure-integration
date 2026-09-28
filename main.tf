@@ -49,7 +49,10 @@ data "azurerm_management_group" "scope" {
 resource "azuread_service_principal" "infracost" {
   client_id    = var.infracost_client_id
   use_existing = true
-  tags         = [for key, value in local.common_tags : "${key}:${value}"]
+  tags = concat(
+    ["WindowsAzureActiveDirectoryIntegratedApp"],
+    [for key, value in local.common_tags : "${key}:${value}"],
+  )
 }
 
 resource "azurerm_role_assignment" "infracost" {

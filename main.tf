@@ -69,3 +69,12 @@ resource "azurerm_role_assignment" "infracost" {
   principal_type       = "ServicePrincipal"
   description          = "Infracost read-only access"
 }
+
+module "billing" {
+  source = "./modules/billing"
+
+  billing_agreement_type      = var.billing_agreement_type
+  billing_account_id          = var.billing_account_id
+  service_principal_object_id = azuread_service_principal.infracost.object_id
+  service_principal_tenant_id = data.azuread_client_config.current.tenant_id
+}

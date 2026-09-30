@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/infracost/terraform-azure-integration/compare/v0.3.0...v0.4.0) (2026-09-30)
+
+
+### Features
+
+* assign billing account reader role for EA and MCA ([#11](https://github.com/infracost/terraform-azure-integration/issues/11)) ([545597c](https://github.com/infracost/terraform-azure-integration/commit/545597c85bca0b3ecfc578718fbd2c3350a16061))
+
+
+### Miscellaneous
+
+* pin GitHub Actions to SHAs (FIX-831) ([#12](https://github.com/infracost/terraform-azure-integration/issues/12)) ([35b45c3](https://github.com/infracost/terraform-azure-integration/commit/35b45c31756db45b99d9e5efa9e60c1770ded934))
+
 ## [0.3.0](https://github.com/infracost/terraform-azure-integration/compare/v0.2.2...v0.3.0) (2026-09-28)
 
 

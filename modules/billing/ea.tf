@@ -3,8 +3,6 @@ locals {
     agreement_type     = "EnterpriseAgreement"
     role_name          = "EnrollmentReader"
     role_definition_id = "24f8edb6-1668-4659-b5e2-40bb5f3a7d7e"
-    caller_role_name   = "Enterprise Administrator"
-    caller_role_id     = "9f1983cb-2574-400c-87e9-34cf8e2280db"
   }
 
   enrollment_reader_assignment_name = uuidv5("url", join("/", [

@@ -19,6 +19,6 @@ output "role_assignment_ids" {
 }
 
 output "billing_role_assignment_id" {
-  description = "ID of the billing role assignment on the billing account: EnrollmentReader for EA, Billing account reader for MCA."
-  value       = module.billing.role_assignment_id
+  description = "ID of the billing role assignment on the billing account: EnrollmentReader for EA, Billing account reader for MCA. Null if enable_top_level_billing_access is false."
+  value       = one(module.billing[*].role_assignment_id)
 }

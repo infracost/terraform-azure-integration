@@ -71,6 +71,7 @@ resource "azurerm_role_assignment" "infracost" {
 }
 
 module "billing" {
+  count  = var.enable_top_level_billing_access ? 1 : 0
   source = "./modules/billing"
 
   billing_agreement_type      = var.billing_agreement_type

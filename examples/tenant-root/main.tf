@@ -36,22 +36,31 @@ variable "infracost_client_id" {
   type        = string
 }
 
+variable "enable_top_level_billing_access" {
+  description = "Assign a billing reader role on the whole billing account. Set to false if you cannot assign billing roles."
+  type        = bool
+  default     = true
+}
+
 variable "billing_agreement_type" {
   description = "Billing agreement of the billing account: EA or MCA."
   type        = string
+  default     = null
 }
 
 variable "billing_account_id" {
   description = "ID of the EA enrollment or MCA billing account."
   type        = string
+  default     = null
 }
 
 module "infracost" {
   source = "../.."
 
-  infracost_client_id    = var.infracost_client_id
-  billing_agreement_type = var.billing_agreement_type
-  billing_account_id     = var.billing_account_id
+  infracost_client_id             = var.infracost_client_id
+  enable_top_level_billing_access = var.enable_top_level_billing_access
+  billing_agreement_type          = var.billing_agreement_type
+  billing_account_id              = var.billing_account_id
 }
 
 output "tenant_id" {

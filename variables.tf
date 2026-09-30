@@ -36,14 +36,31 @@ variable "service_principal_owners" {
   }
 }
 
-variable "billing_agreement_type" {
-  description = "Billing agreement of the billing account where Infracost gets read access to billing data. EA assigns EnrollmentReader on the enrollment. MCA assigns Billing account reader on the billing account."
-  type        = string
+variable "enable_top_level_billing_access" {
+  description = "Assign a billing reader role on the whole billing account. This gives Infracost read access to all charges, invoices and price sheets of the billing account, beyond the management groups in management_group_names. Recommended. Set to false if the principal running Terraform cannot assign billing roles."
+  type        = bool
+  default     = true
   nullable    = false
 }
 
-variable "billing_account_id" {
-  description = "ID of the billing account. For EA, this is the enrollment number. For MCA, this is the billing account ID in the format <guid>:<guid>_<yyyy-mm-dd>."
+variable "billing_agreement_type" {
+  description = "Billing agreement of the billing account where Infracost gets read access to billing data. EA assigns EnrollmentReader on the enrollment. MCA assigns Billing account reader on the billing account. Required if enable_top_level_billing_access is true."
   type        = string
-  nullable    = false
+  default     = null
+
+  validation {
+    condition     = !var.enable_top_level_billing_access || var.billing_agreement_type != null
+    error_message = "billing_agreement_type is required when enable_top_level_billing_access is true."
+  }
+}
+
+variable "billing_account_id" {
+  description = "ID of the billing account. For EA, this is the enrollment number. For MCA, this is the billing account ID in the format <guid>:<guid>_<yyyy-mm-dd>. Required if enable_top_level_billing_access is true."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = !var.enable_top_level_billing_access || var.billing_account_id != null
+    error_message = "billing_account_id is required when enable_top_level_billing_access is true."
+  }
 }

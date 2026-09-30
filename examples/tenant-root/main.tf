@@ -54,6 +54,34 @@ variable "billing_account_id" {
   default     = null
 }
 
+variable "billing_exports_location" {
+  description = "Azure region of the billing exports storage account."
+  type        = string
+  default     = null
+}
+
+variable "enable_billing_exports" {
+  description = "Give Infracost read access to a daily FOCUS cost export."
+  type        = bool
+  default     = true
+}
+
+variable "provision_billing_exports" {
+  description = "Create the storage account and FOCUS cost export."
+  type        = bool
+  default     = true
+}
+
+variable "existing_billing_exports" {
+  description = "Existing FOCUS cost export destination."
+  type = object({
+    storage_account_id = string
+    container          = string
+    root_path          = string
+  })
+  default = null
+}
+
 module "infracost" {
   source = "../.."
 
@@ -61,6 +89,10 @@ module "infracost" {
   enable_top_level_billing_access = var.enable_top_level_billing_access
   billing_agreement_type          = var.billing_agreement_type
   billing_account_id              = var.billing_account_id
+  billing_exports_location        = var.billing_exports_location
+  enable_billing_exports          = var.enable_billing_exports
+  provision_billing_exports       = var.provision_billing_exports
+  existing_billing_exports        = var.existing_billing_exports
 }
 
 output "tenant_id" {
@@ -73,4 +105,8 @@ output "service_principal_object_id" {
 
 output "billing_role_assignment_id" {
   value = module.infracost.billing_role_assignment_id
+}
+
+output "billing_exports" {
+  value = module.infracost.billing_exports
 }

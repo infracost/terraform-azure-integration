@@ -9,7 +9,7 @@ terraform {
   }
 }
 
-# Billing assigns billing permissions to the Infracost application service principal.
+# Billing access assigns billing permissions to the Infracost application service principal.
 
 locals {
   billing_api_version         = "2024-04-01"

@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 4.0"
     }
+    azapi = {
+      source  = "azure/azapi"
+      version = "~> 2.0"
+    }
   }
 }
 
@@ -64,4 +68,14 @@ resource "azurerm_role_assignment" "infracost" {
   principal_id         = azuread_service_principal.infracost.object_id
   principal_type       = "ServicePrincipal"
   description          = "Infracost read-only access"
+}
+
+module "billing" {
+  count  = var.enable_top_level_billing_access ? 1 : 0
+  source = "./modules/billing"
+
+  billing_agreement_type      = var.billing_agreement_type
+  billing_account_id          = var.billing_account_id
+  service_principal_object_id = azuread_service_principal.infracost.object_id
+  service_principal_tenant_id = data.azuread_client_config.current.tenant_id
 }

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/infracost/terraform-azure-integration/compare/v0.4.0...v0.4.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* remove billing permissions precondition that fails for billing account owners ([#14](https://github.com/infracost/terraform-azure-integration/issues/14)) ([b058554](https://github.com/infracost/terraform-azure-integration/commit/b058554bcd6a8f92da1f4b7a526dc2d7e1b7d98d))
+
 ## [0.4.0](https://github.com/infracost/terraform-azure-integration/compare/v0.3.0...v0.4.0) (2026-09-30)
 
 

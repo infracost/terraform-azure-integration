@@ -85,27 +85,15 @@ variable "root_path" {
   nullable    = false
 }
 
-variable "cool_tier_after_days" {
-  description = "Number of days after the last modification before billing export files move to the cool tier."
+variable "cold_tier_after_days" {
+  description = "Number of days after the last modification before billing export files move to the cold tier."
   type        = number
   default     = 90
   nullable    = false
 
   validation {
-    condition     = var.cool_tier_after_days >= 0 && floor(var.cool_tier_after_days) == var.cool_tier_after_days
-    error_message = "cool_tier_after_days must be a whole number of 0 or more."
-  }
-}
-
-variable "archive_tier_after_days" {
-  description = "Number of days after the last modification before billing export files move to the archive tier."
-  type        = number
-  default     = 180
-  nullable    = false
-
-  validation {
-    condition     = var.archive_tier_after_days > var.cool_tier_after_days && floor(var.archive_tier_after_days) == var.archive_tier_after_days
-    error_message = "archive_tier_after_days must be a whole number greater than cool_tier_after_days."
+    condition     = var.cold_tier_after_days >= 0 && floor(var.cold_tier_after_days) == var.cold_tier_after_days
+    error_message = "cold_tier_after_days must be a whole number of 0 or more."
   }
 }
 
@@ -116,8 +104,8 @@ variable "retention_days" {
   nullable    = false
 
   validation {
-    condition     = var.retention_days > var.archive_tier_after_days && var.retention_days <= 99999 && floor(var.retention_days) == var.retention_days
-    error_message = "retention_days must be a whole number greater than archive_tier_after_days and at most 99999."
+    condition     = var.retention_days > var.cold_tier_after_days && var.retention_days <= 99999 && floor(var.retention_days) == var.retention_days
+    error_message = "retention_days must be a whole number greater than cold_tier_after_days and at most 99999."
   }
 }
 

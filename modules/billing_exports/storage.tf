@@ -63,9 +63,8 @@ resource "azurerm_storage_management_policy" "billing_exports" {
 
     actions {
       base_blob {
-        tier_to_cool_after_days_since_modification_greater_than    = var.cool_tier_after_days
-        tier_to_archive_after_days_since_modification_greater_than = var.archive_tier_after_days
-        delete_after_days_since_modification_greater_than          = var.retention_days
+        tier_to_cold_after_days_since_modification_greater_than = var.cold_tier_after_days
+        delete_after_days_since_modification_greater_than       = var.retention_days
       }
     }
   }

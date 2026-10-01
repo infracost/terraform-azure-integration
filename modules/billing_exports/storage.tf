@@ -6,6 +6,7 @@ locals {
   ])
 }
 
+# https://learn.microsoft.com/en-us/rest/api/resources/providers/register?view=rest-resources-2021-04-01&tabs=HTTP
 resource "azapi_resource_action" "resource_provider_registration" {
   for_each = local.create_billing_exports ? local.required_resource_providers : toset([])
 

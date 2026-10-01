@@ -20,6 +20,7 @@ resource "terraform_data" "export_schedule_start" {
   }
 }
 
+# https://learn.microsoft.com/en-us/rest/api/cost-management/exports/create-or-update?view=rest-cost-management-2025-03-01&tabs=HTTP
 resource "azapi_resource" "focus_cost_export" {
   count = local.create_billing_exports ? 1 : 0
 

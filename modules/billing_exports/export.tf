@@ -7,7 +7,13 @@ locals {
 resource "terraform_data" "export_schedule_start" {
   count = local.create_billing_exports ? 1 : 0
 
-  input = formatdate("YYYY-MM-DD'T'00:00:00Z", plantimestamp())
+  input = formatdate("YYYY-MM-DD'T'00:00:00Z", timeadd(plantimestamp(), "24h"))
+
+  triggers_replace = [
+    var.export_name,
+    local.billing_account_resource_id,
+    var.location,
+  ]
 
   lifecycle {
     ignore_changes = [input]

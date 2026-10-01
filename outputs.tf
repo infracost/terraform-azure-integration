@@ -25,10 +25,12 @@ output "billing_role_assignment_id" {
 
 output "billing_exports" {
   description = "Location of the billing exports that Infracost reads. Provide this to Infracost. Null if enable_billing_exports is false."
-  value = var.enable_billing_exports ? {
-    storage_account_id = module.billing_exports[0].storage_account_id
-    container          = module.billing_exports[0].container_name
-    root_path          = module.billing_exports[0].root_path
-    export_id          = module.billing_exports[0].export_id
-  } : null
+  value = one([
+    for billing_exports in module.billing_exports : {
+      storage_account_id = billing_exports.storage_account_id
+      container          = billing_exports.container_name
+      root_path          = billing_exports.root_path
+      export_id          = billing_exports.export_id
+    }
+  ])
 }

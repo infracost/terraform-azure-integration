@@ -8,7 +8,7 @@ locals {
 
 # https://learn.microsoft.com/en-us/rest/api/resources/providers/register?view=rest-resources-2021-04-01&tabs=HTTP
 resource "azapi_resource_action" "resource_provider_registration" {
-  for_each = local.create_billing_exports ? local.required_resource_providers : toset([])
+  for_each = var.provision_billing_exports ? local.required_resource_providers : toset([])
 
   type        = "Microsoft.Resources/providers@2021-04-01"
   resource_id = "/subscriptions/${var.subscription_id}/providers/${each.value}"
@@ -17,7 +17,7 @@ resource "azapi_resource_action" "resource_provider_registration" {
 }
 
 resource "azurerm_resource_group" "billing_exports" {
-  count = local.create_billing_exports ? 1 : 0
+  count = var.provision_billing_exports ? 1 : 0
 
   name     = var.resource_group_name
   location = var.location
@@ -25,7 +25,7 @@ resource "azurerm_resource_group" "billing_exports" {
 }
 
 resource "azurerm_storage_account" "billing_exports" {
-  count = local.create_billing_exports ? 1 : 0
+  count = var.provision_billing_exports ? 1 : 0
 
   name                            = var.storage_account_name
   resource_group_name             = azurerm_resource_group.billing_exports[0].name
@@ -41,7 +41,7 @@ resource "azurerm_storage_account" "billing_exports" {
 }
 
 resource "azurerm_storage_container" "billing_exports" {
-  count = local.create_billing_exports ? 1 : 0
+  count = var.provision_billing_exports ? 1 : 0
 
   name                  = var.container_name
   storage_account_id    = azurerm_storage_account.billing_exports[0].id
@@ -49,7 +49,7 @@ resource "azurerm_storage_container" "billing_exports" {
 }
 
 resource "azurerm_storage_management_policy" "billing_exports" {
-  count = local.create_billing_exports ? 1 : 0
+  count = var.provision_billing_exports ? 1 : 0
 
   storage_account_id = azurerm_storage_account.billing_exports[0].id
 

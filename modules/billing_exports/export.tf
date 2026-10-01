@@ -5,7 +5,7 @@ locals {
 }
 
 resource "terraform_data" "export_schedule_start" {
-  count = local.create_billing_exports ? 1 : 0
+  count = var.provision_billing_exports ? 1 : 0
 
   input = formatdate("YYYY-MM-DD'T'00:00:00Z", timeadd(plantimestamp(), "24h"))
 
@@ -22,7 +22,7 @@ resource "terraform_data" "export_schedule_start" {
 
 # https://learn.microsoft.com/en-us/rest/api/cost-management/exports/create-or-update?view=rest-cost-management-2025-03-01&tabs=HTTP
 resource "azapi_resource" "focus_cost_export" {
-  count = local.create_billing_exports ? 1 : 0
+  count = var.provision_billing_exports ? 1 : 0
 
   type      = "Microsoft.CostManagement/exports@${local.cost_management_api_version}"
   name      = var.export_name
@@ -81,7 +81,7 @@ resource "azapi_resource" "focus_cost_export" {
 }
 
 resource "azurerm_role_assignment" "export_blob_writer" {
-  count = local.create_billing_exports ? 1 : 0
+  count = var.provision_billing_exports ? 1 : 0
 
   scope                = azurerm_storage_account.billing_exports[0].id
   role_definition_name = "Storage Blob Data Contributor"

@@ -14,11 +14,9 @@ terraform {
 }
 
 locals {
-  create_billing_exports = var.provision_billing_exports
-
-  storage_account_id = local.create_billing_exports ? azurerm_storage_account.billing_exports[0].id : var.existing_billing_exports.storage_account_id
-  container_name     = local.create_billing_exports ? azurerm_storage_container.billing_exports[0].name : var.existing_billing_exports.container
-  root_path          = local.create_billing_exports ? var.root_path : var.existing_billing_exports.root_path
+  storage_account_id = var.provision_billing_exports ? azurerm_storage_account.billing_exports[0].id : var.existing_billing_exports.storage_account_id
+  container_name     = var.provision_billing_exports ? azurerm_storage_container.billing_exports[0].name : var.existing_billing_exports.container
+  root_path          = var.provision_billing_exports ? var.root_path : var.existing_billing_exports.root_path
 
   container_resource_id = join("/", [
     local.storage_account_id,

@@ -3,8 +3,6 @@ locals {
     agreement_type     = "MicrosoftCustomerAgreement"
     role_name          = "Billing account reader"
     role_definition_id = "50000000-aaaa-bbbb-cccc-100000000002"
-    caller_role_name   = "Billing account owner"
-    caller_role_id     = "50000000-aaaa-bbbb-cccc-100000000000"
   }
 
   billing_account_reader_assignment_name = join("_", [

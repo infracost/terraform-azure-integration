@@ -1,5 +1,6 @@
 locals {
   cost_management_api_version = "2025-03-01"
+  export_schema               = "1.2-preview"
   billing_account_resource_id = "/providers/Microsoft.Billing/billingAccounts/${var.billing_account_id}"
   export_schedule_end         = "2099-12-31T00:00:00Z"
 }
@@ -45,7 +46,7 @@ resource "azapi_resource" "focus_cost_export" {
         dataSet = {
           granularity = "Daily"
           configuration = {
-            dataVersion = "1.2-preview"
+            dataVersion = local.export_schema
           }
         }
       }

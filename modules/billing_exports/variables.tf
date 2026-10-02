@@ -26,7 +26,7 @@ variable "existing_billing_exports" {
   }
 
   validation {
-    condition     = var.existing_billing_exports == null || can(regex("^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft.Storage/storageAccounts/[^/]+$", var.existing_billing_exports.storage_account_id))
+    condition     = var.existing_billing_exports == null || can(regex("(?i)^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\\.Storage/storageAccounts/[^/]+$", var.existing_billing_exports.storage_account_id))
     error_message = "existing_billing_exports.storage_account_id must be a storage account resource ID."
   }
 }

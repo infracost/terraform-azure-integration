@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/infracost/terraform-azure-integration/compare/v0.4.1...v0.5.0) (2026-10-02)
+
+
+### Features
+
+* add billing_exports module for FOCUS cost export ([#15](https://github.com/infracost/terraform-azure-integration/issues/15)) ([325b29c](https://github.com/infracost/terraform-azure-integration/commit/325b29cf9739594f9282259908255bfb1a158aca))
+
 ## [0.4.1](https://github.com/infracost/terraform-azure-integration/compare/v0.4.0...v0.4.1) (2026-10-01)
 
 

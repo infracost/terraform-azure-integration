@@ -20,5 +20,17 @@ output "role_assignment_ids" {
 
 output "billing_role_assignment_id" {
   description = "ID of the billing role assignment on the billing account: EnrollmentReader for EA, Billing account reader for MCA. Null if enable_top_level_billing_access is false."
-  value       = one(module.billing[*].role_assignment_id)
+  value       = one(module.billing_access[*].role_assignment_id)
+}
+
+output "billing_exports" {
+  description = "Location of the billing exports that Infracost reads. Provide this to Infracost. Null if enable_billing_exports is false."
+  value = one([
+    for billing_exports in module.billing_exports : {
+      storage_account_id = billing_exports.storage_account_id
+      container          = billing_exports.container_name
+      root_path          = billing_exports.root_path
+      export_id          = billing_exports.export_id
+    }
+  ])
 }

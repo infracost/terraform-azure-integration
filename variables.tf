@@ -55,12 +55,65 @@ variable "billing_agreement_type" {
 }
 
 variable "billing_account_id" {
-  description = "ID of the billing account. For EA, this is the enrollment number. For MCA, this is the billing account ID in the format <guid>:<guid>_<yyyy-mm-dd>. Required if enable_top_level_billing_access is true."
+  description = "ID of the billing account. For EA, this is the enrollment number. For MCA, this is the billing account ID in the format <guid>:<guid>_<yyyy-mm-dd>."
   type        = string
   default     = null
 
   validation {
-    condition     = !var.enable_top_level_billing_access || var.billing_account_id != null
-    error_message = "billing_account_id is required when enable_top_level_billing_access is true."
+    condition     = !(var.enable_top_level_billing_access || (var.enable_billing_exports && var.provision_billing_exports)) || var.billing_account_id != null
+    error_message = "billing_account_id is required when enable_top_level_billing_access is true, or when enable_billing_exports and provision_billing_exports are true."
   }
+}
+
+variable "enable_billing_exports" {
+  description = "Give Infracost read access to a daily FOCUS cost export of the billing account."
+  type        = bool
+  default     = true
+  nullable    = false
+}
+
+variable "provision_billing_exports" {
+  description = "Create the storage account and FOCUS cost export. If false, existing_billing_exports is used."
+  type        = bool
+  default     = true
+  nullable    = false
+}
+
+variable "existing_billing_exports" {
+  description = "Existing FOCUS cost export destination that Infracost reads."
+  type = object({
+    storage_account_id = string
+    container          = string
+    root_path          = string
+  })
+  default = null
+
+  validation {
+    condition     = !var.enable_billing_exports || var.provision_billing_exports || var.existing_billing_exports != null
+    error_message = "existing_billing_exports is required when enable_billing_exports is true and provision_billing_exports is false."
+  }
+}
+
+variable "billing_exports_location" {
+  description = "Azure region of the billing exports storage account."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = !(var.enable_billing_exports && var.provision_billing_exports) || var.billing_exports_location != null
+    error_message = "billing_exports_location is required when enable_billing_exports and provision_billing_exports are true."
+  }
+}
+
+variable "billing_exports_resource_group_name" {
+  description = "Name of the billing exports resource group."
+  type        = string
+  default     = "infracost-billing-exports"
+  nullable    = false
+}
+
+variable "billing_exports_storage_account_name" {
+  description = "Globally unique name of the billing exports storage account. Derived from the tenant ID if null."
+  type        = string
+  default     = null
 }

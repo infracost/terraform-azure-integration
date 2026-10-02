@@ -1,0 +1,74 @@
+locals {
+  required_resource_providers = toset([
+    "Microsoft.Storage",
+    "Microsoft.CostManagement",
+    "Microsoft.CostManagementExports",
+  ])
+}
+
+# https://learn.microsoft.com/en-us/rest/api/resources/providers/register?view=rest-resources-2021-04-01&tabs=HTTP
+resource "azapi_resource_action" "resource_provider_registration" {
+  for_each = var.provision_billing_exports ? local.required_resource_providers : toset([])
+
+  type        = "Microsoft.Resources/providers@2021-04-01"
+  resource_id = "/subscriptions/${var.subscription_id}/providers/${each.value}"
+  action      = "register"
+  method      = "POST"
+}
+
+resource "azurerm_resource_group" "billing_exports" {
+  count = var.provision_billing_exports ? 1 : 0
+
+  name     = var.resource_group_name
+  location = var.location
+  tags     = var.tags
+}
+
+resource "azurerm_storage_account" "billing_exports" {
+  count = var.provision_billing_exports ? 1 : 0
+
+  name                            = var.storage_account_name
+  resource_group_name             = azurerm_resource_group.billing_exports[0].name
+  location                        = azurerm_resource_group.billing_exports[0].location
+  account_tier                    = "Standard"
+  account_replication_type        = "LRS"
+  min_tls_version                 = "TLS1_2"
+  https_traffic_only_enabled      = true
+  allow_nested_items_to_be_public = false
+  shared_access_key_enabled       = false
+  default_to_oauth_authentication = true
+  tags                            = var.tags
+
+  depends_on = [azapi_resource_action.resource_provider_registration]
+}
+
+resource "azurerm_storage_container" "billing_exports" {
+  count = var.provision_billing_exports ? 1 : 0
+
+  name                  = var.container_name
+  storage_account_id    = azurerm_storage_account.billing_exports[0].id
+  container_access_type = "private"
+}
+
+resource "azurerm_storage_management_policy" "billing_exports" {
+  count = var.provision_billing_exports ? 1 : 0
+
+  storage_account_id = azurerm_storage_account.billing_exports[0].id
+
+  rule {
+    name    = "tierAndDeleteBillingExports"
+    enabled = true
+
+    filters {
+      blob_types   = ["blockBlob"]
+      prefix_match = ["${azurerm_storage_container.billing_exports[0].name}/${var.root_path}"]
+    }
+
+    actions {
+      base_blob {
+        tier_to_cold_after_days_since_modification_greater_than = var.cold_tier_after_days
+        delete_after_days_since_modification_greater_than       = var.retention_days
+      }
+    }
+  }
+}

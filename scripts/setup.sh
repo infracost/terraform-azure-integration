@@ -90,7 +90,6 @@ parse_args() {
   done
 }
 
-# terraform: variable validations in variables.tf, modules/billing_access/variables.tf, modules/billing_exports/variables.tf
 validate_args() {
   [[ "$infracost_client_id" =~ $GUID_PATTERN ]] || fail "--client-id must be a GUID."
   validate_tenant_and_subscription_args
@@ -123,7 +122,6 @@ validate_args() {
   done
 }
 
-# terraform: azuread_service_principal.infracost
 ensure_service_principal() {
   local owner existing_owners
   log "Service principal for application ${infracost_client_id}"
@@ -173,7 +171,6 @@ ensure_role_assignment() {
   printf '%s\n' "$assignment_id"
 }
 
-# terraform: azurerm_role_assignment.infracost
 ensure_management_group_roles() {
   local name scope role assignment_id
   role_assignment_ids_json=""
@@ -188,7 +185,6 @@ ensure_management_group_roles() {
   done <<<"$management_group_scopes"
 }
 
-# terraform: module.billing_access.data.azapi_resource.billing_account, module.billing_access.terraform_data.billing_preconditions
 validate_billing_account() {
   local expected_agreement_type actual_agreement_type
   [ "$enable_top_level_billing_access" = true ] || return 0
@@ -265,7 +261,6 @@ preflight() {
   report_preflight
 }
 
-# terraform: module.billing_access
 ensure_billing_access() {
   local billing_account_resource_id="/providers/Microsoft.Billing/billingAccounts/${billing_account_id}"
   local role_definition_id properties
@@ -285,7 +280,6 @@ ensure_billing_access() {
   fi
 }
 
-# terraform: module.billing_access.azapi_resource.enrollment_reader
 ensure_enrollment_reader() {
   local billing_account_resource_id="$1" role_definition_id="$2" body="$3" assignment_name url
   assignment_name="$(uuidv5_url "${billing_account_resource_id}/${service_principal_object_id}/${role_definition_id}")"
@@ -298,7 +292,6 @@ ensure_enrollment_reader() {
   billing_role_assignment_id="$(az rest --method PUT --url "$url" --body "$body" --query id -o tsv)"
 }
 
-# terraform: module.billing_access.azapi_resource_action.billing_account_reader
 ensure_billing_account_reader() {
   local billing_account_resource_id="$1" role_definition_id="$2" properties="$3" assignment_resource_id
   assignment_resource_id="${billing_account_resource_id}/billingRoleAssignments/${role_definition_id}_${service_principal_object_id}"
@@ -319,7 +312,6 @@ ensure_billing_account_reader() {
     --body "$properties" --query id -o tsv)"
 }
 
-# terraform: module.billing_exports.azapi_resource_action.resource_provider_registration
 register_resource_providers() {
   local namespace
   for namespace in $(unregistered_resource_providers); do
@@ -328,14 +320,12 @@ register_resource_providers() {
   done
 }
 
-# terraform: module.billing_exports.azurerm_resource_group.billing_exports
 ensure_resource_group() {
   log "Resource group ${billing_exports_resource_group_name}"
   mutate az group create --name "$billing_exports_resource_group_name" --location "$billing_exports_location" \
     --tags "InfracostModuleVersion=${SCRIPT_VERSION}" --only-show-errors >/dev/null
 }
 
-# terraform: module.billing_exports.azurerm_storage_account.billing_exports
 ensure_storage_account() {
   log "Storage account ${billing_exports_storage_account_name}"
   storage_account_id="$(az storage account show --name "$billing_exports_storage_account_name" \
@@ -351,7 +341,6 @@ ensure_storage_account() {
   storage_account_id="$(created_storage_account_id)"
 }
 
-# terraform: module.billing_exports.azurerm_storage_container.billing_exports
 ensure_storage_container() {
   log "Storage container ${billing_exports_container_name}"
   [ "$(az storage container-rm exists --storage-account "$storage_account_id" \
@@ -360,7 +349,6 @@ ensure_storage_container() {
     --name "$billing_exports_container_name" --public-access off --only-show-errors >/dev/null
 }
 
-# terraform: module.billing_exports.azurerm_storage_management_policy.billing_exports
 ensure_storage_management_policy() {
   log "Storage lifecycle policy"
   mutate az storage account management-policy create --account-name "$billing_exports_storage_account_name" \
@@ -369,7 +357,6 @@ ensure_storage_management_policy() {
     >/dev/null
 }
 
-# terraform: module.billing_exports.terraform_data.export_schedule_start, module.billing_exports.azapi_resource.focus_cost_export
 ensure_focus_cost_export() {
   local url schedule_start body
   url="/providers/Microsoft.Billing/billingAccounts/${billing_account_id}/providers/Microsoft.CostManagement/exports/${billing_exports_export_name}?api-version=${COST_MANAGEMENT_API_VERSION}"
@@ -391,7 +378,6 @@ ensure_focus_cost_export() {
     --query "[id, identity.principalId]" -o tsv | tr '\n' ' ')
 }
 
-# terraform: module.billing_exports (storage.tf, export.tf, main.tf)
 ensure_billing_exports() {
   local container_resource_id
   billing_exports_json="null"
@@ -410,13 +396,11 @@ ensure_billing_exports() {
     ensure_storage_management_policy
     ensure_focus_cost_export
 
-    # terraform: module.billing_exports.azurerm_role_assignment.export_blob_writer
     log "Role Storage Blob Data Contributor on storage account for the cost export"
     ensure_role_assignment "$storage_account_id" "Storage Blob Data Contributor" \
       "Infracost FOCUS cost export write access" "$export_principal_id" >/dev/null
   fi
 
-  # terraform: module.billing_exports.azurerm_role_assignment.blob_reader
   container_resource_id="${storage_account_id}/blobServices/default/containers/${billing_exports_container_name}"
   log "Role Storage Blob Data Reader on container ${billing_exports_container_name}"
   ensure_role_assignment "$container_resource_id" "Storage Blob Data Reader" \
@@ -425,7 +409,6 @@ ensure_billing_exports() {
   billing_exports_json="{\"storage_account_id\":$(json_string "$storage_account_id"),\"container\":$(json_string "$billing_exports_container_name"),\"root_path\":$(json_string "$billing_exports_root_path"),\"export_id\":$(json_string_or_null "$export_id")}"
 }
 
-# terraform: outputs.tf
 print_outputs() {
   log "Values to provide to Infracost"
   cat <<EOF

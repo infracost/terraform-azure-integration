@@ -179,7 +179,6 @@ delete_role_assignments() {
     --query "[?scope=='${scope}'].id" -o tsv 2>/dev/null || true)
 }
 
-# terraform: module.billing_exports (main.tf, export.tf, storage.tf)
 remove_billing_exports() {
   local storage_account_id container_resource_id export_url export_principal_id
   [ "$enable_billing_exports" = true ] || return 0
@@ -191,7 +190,6 @@ remove_billing_exports() {
     storage_account_id="$(created_storage_account_id)"
   fi
 
-  # terraform: module.billing_exports.azurerm_role_assignment.blob_reader
   container_resource_id="${storage_account_id}/blobServices/default/containers/${billing_exports_container_name}"
   log "Role Storage Blob Data Reader on container ${billing_exports_container_name}"
   delete_role_assignments "$container_resource_id" "Storage Blob Data Reader" "$service_principal_object_id"
@@ -201,26 +199,21 @@ remove_billing_exports() {
   export_url="/providers/Microsoft.Billing/billingAccounts/${billing_account_id}/providers/Microsoft.CostManagement/exports/${billing_exports_export_name}?api-version=${COST_MANAGEMENT_API_VERSION}"
   export_principal_id="$(az rest --method GET --url "$export_url" --query identity.principalId -o tsv 2>/dev/null || true)"
 
-  # terraform: module.billing_exports.azurerm_role_assignment.export_blob_writer
   log "Role Storage Blob Data Contributor on storage account for the cost export"
   delete_role_assignments "$storage_account_id" "Storage Blob Data Contributor" "$export_principal_id"
 
-  # terraform: module.billing_exports.azapi_resource.focus_cost_export, module.billing_exports.terraform_data.export_schedule_start
   log "FOCUS cost export ${billing_exports_export_name}"
   [ -z "$export_principal_id" ] || mutate az rest --method DELETE --url "$export_url"
 
   [ "$keep_storage" = false ] || { log "Keeping storage account ${billing_exports_storage_account_name}"; return 0; }
 
-  # terraform: module.billing_exports.azurerm_storage_account.billing_exports, module.billing_exports.azurerm_storage_container.billing_exports, module.billing_exports.azurerm_storage_management_policy.billing_exports
   log "Storage account ${billing_exports_storage_account_name}"
   if az storage account show --ids "$storage_account_id" --query id -o tsv >/dev/null 2>&1; then
     mutate az storage account delete --ids "$storage_account_id" --yes --only-show-errors
   fi
 
-  # terraform: module.billing_exports.azurerm_resource_group.billing_exports
   remove_resource_group
 
-  # terraform: module.billing_exports.azapi_resource_action.resource_provider_registration
   log "Resource providers stay registered"
 }
 
@@ -238,7 +231,6 @@ remove_resource_group() {
   mutate az group delete --name "$billing_exports_resource_group_name" --yes --only-show-errors
 }
 
-# terraform: module.billing_access
 remove_billing_access() {
   local billing_account_resource_id="/providers/Microsoft.Billing/billingAccounts/${billing_account_id}"
   local role_definition_id assignment_name assignment_url
@@ -247,10 +239,8 @@ remove_billing_access() {
 
   role_definition_id="$(billing_role_definition_id)"
   if [ "$billing_agreement_type" = EA ]; then
-    # terraform: module.billing_access.azapi_resource.enrollment_reader
     assignment_name="$(uuidv5_url "${billing_account_resource_id}/${service_principal_object_id}/${role_definition_id}")"
   else
-    # terraform: module.billing_access.azapi_resource_action.billing_account_reader_removal
     assignment_name="${role_definition_id}_${service_principal_object_id}"
   fi
   assignment_url="${billing_account_resource_id}/billingRoleAssignments/${assignment_name}?api-version=${BILLING_API_VERSION}"
@@ -260,7 +250,6 @@ remove_billing_access() {
   mutate az rest --method DELETE --url "$assignment_url"
 }
 
-# terraform: azurerm_role_assignment.infracost
 remove_management_group_roles() {
   local name scope role
   IFS=',' read -r -a role_list <<<"$role_definition_names"
@@ -273,7 +262,6 @@ remove_management_group_roles() {
   done <<<"$management_group_scopes"
 }
 
-# terraform: azuread_service_principal.infracost
 remove_service_principal() {
   [ -n "$service_principal_object_id" ] || return 0
   log "Service principal for application ${infracost_client_id}"

@@ -75,7 +75,6 @@ json_string_or_null() {
   if [ -n "$1" ]; then json_string "$1"; else printf 'null'; fi
 }
 
-# terraform: data.azuread_client_config.current, data.azurerm_client_config.current
 read_client_config() {
   command -v az >/dev/null || fail "az CLI not found."
   tenant_id="$(az account show --query tenantId -o tsv)" \
@@ -121,7 +120,6 @@ resource_exists() {
   az resource show --ids "$1" --query id -o tsv >/dev/null 2>&1
 }
 
-# terraform: data.azurerm_management_group.scope
 read_management_groups() {
   local name id
   [ -n "$management_group_names" ] || management_group_names="$tenant_id"

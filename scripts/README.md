@@ -134,8 +134,8 @@ See [`examples/`](examples/) for the bash and PowerShell commands of each use ca
 | Option | Description | Default |
 | --- | --- | --- |
 | `--client-id <guid>` | Client ID of the Infracost Azure application. Required. | |
-| `--tenant-id <guid>` | Tenant to use. The script stops if the `az` CLI targets a different tenant. | Not checked |
-| `--subscription <guid>` | Subscription that hosts the billing exports. The script stops if the `az` CLI targets a different subscription. | Not checked |
+| `--tenant-id <guid>` | Tenant to use. The script stops if the `az` CLI targets a different tenant. | Tenant of the `az` CLI. Not checked. |
+| `--subscription <guid>` | Subscription that hosts the billing exports. The script stops if the `az` CLI targets a different subscription. | Default subscription of the `az` CLI. Not checked. |
 | `--management-groups <a,b>` | Management groups where Infracost gets read access. | Tenant root management group |
 | `--roles <a,b>` | Roles on the management groups. | `Reader,Cost Management Reader,Monitoring Reader` |
 | `--owners <oid,oid>` | Object IDs to add as owners of the service principal. Existing owners are kept. | No owners |

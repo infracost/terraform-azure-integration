@@ -1,16 +1,28 @@
-# setup.sh and teardown.sh
+# Setup and teardown scripts
 
-`setup.sh` sets up the Infracost Azure integration with the `az` CLI. It gives the same result as the Terraform module in this repository. Use it if you do not use Terraform.
+The setup script sets up the Infracost Azure integration with the `az` CLI. It gives the same result as the Terraform module in this repository. Use it if you do not use Terraform.
 
-`teardown.sh` removes what `setup.sh` created. It gives the same result as `terraform destroy`.
+The teardown script removes what the setup script created. It gives the same result as `terraform destroy`.
 
-You can run each script more than once. `setup.sh` only creates the items that do not exist. `teardown.sh` only removes the items that exist.
+You can run each script more than once. The setup script only creates the items that do not exist. The teardown script only removes the items that exist.
 
-Both scripts load `common.sh`. Keep the three files in the same directory.
+| Directory | Shell | Scripts |
+| --- | --- | --- |
+| `linux/` | bash 3.2 or later on Linux, macOS, WSL or Azure Cloud Shell | `setup.sh`, `teardown.sh`, `common.sh` |
+| `windows/` | Windows PowerShell 5.1 or PowerShell 7 | `setup.ps1`, `teardown.ps1`, `common.ps1` |
+
+Each setup and teardown script loads the `common` file from its directory. Keep the three files of a directory together.
+
+The PowerShell scripts use the parameter with the same name in PascalCase, for example `--client-id` becomes `-ClientId` and `--dry-run` becomes `-DryRun`. For the help of a PowerShell script, run `Get-Help .\scripts\windows\setup.ps1 -Full`. For the help of a bash script, run `./scripts/linux/setup.sh --help`.
+
+The two scripts in a pair have the same steps in the same order, with the same names. For example, `set_storage_account` in `setup.sh` is `Set-StorageAccount` in `setup.ps1`.
+
+If Windows blocks the script, run it with `powershell -ExecutionPolicy Bypass -File .\scripts\windows\setup.ps1 ...`.
 
 ## Prerequisites
 
 - The [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli), signed in to the tenant to set up.
+- For `linux/`: `sha1sum` or `shasum`, `od`, and `date`. Each script checks for these tools and for `az` before it starts.
 - The client ID of the Infracost application. Get it from the Infracost dashboard.
 - These permissions for the principal that runs the script:
 
@@ -33,60 +45,89 @@ az account set --subscription <subscription-id>
 
 Pass `--tenant-id` and `--subscription` to make sure that the script uses this tenant and subscription. The script stops if the `az` CLI targets a different tenant or subscription. This is important when you can sign in to more than one tenant, for example as an Enterprise Agreement administrator with a different home tenant.
 
-Do a dry run first. The script reads the current state and prints the changes, but does not apply them:
+Do a dry run first with `--dry-run`. The script reads the current state and prints each change as a `[dry-run]` line, but does not apply it. Then run the same command without `--dry-run`. The script then prints each change as an `[apply]` line before it applies it.
 
-```bash
-./scripts/setup.sh --dry-run \
-  --client-id <infracost-client-id> \
-  --tenant-id <tenant-id> \
-  --subscription <subscription-id> \
-  --billing-agreement-type MCA \
-  --billing-account-id '<guid>:<guid>_<yyyy-mm-dd>' \
-  --location westeurope
+## Flow
+
+Each step is a function with the same name in both shells, for example `set_storage_account` in bash and `Set-StorageAccount` in PowerShell. Steps that create or remove an item first check if the item exists, so you can run a script more than once.
+
+### Setup
+
+```mermaid
+flowchart TD
+  start([setup.sh / setup.ps1]) --> validate
+  subgraph read [Read and validate. No changes]
+    validate["Validate the options<br/>assert_arguments"]
+    validate --> client["Read the tenant and subscription of the az CLI<br/>read_client_config"]
+    client --> groups["Get the management groups<br/>read_management_groups"]
+    groups --> sp_read["Get the Infracost service principal<br/>read_service_principal"]
+    sp_read --> destination["Calculate the storage account name and export destination<br/>resolve_storage_account_name, resolve_export_destination"]
+    destination --> billing_check["Check the billing agreement type<br/>confirm_billing_account"]
+  end
+  billing_check --> preflight{"Preflight: permissions OK?<br/>invoke_preflight"}
+  preflight -- no --> stop([Stop. List the missing permissions])
+  preflight -- "yes, or --skip-preflight" --> sp
+  subgraph apply [Changes. Printed only with --dry-run]
+    sp["Create the service principal, set tags and owners<br/>set_service_principal"]
+    sp --> mg_roles["Assign the read roles on each management group<br/>set_management_group_roles"]
+    mg_roles --> billing_role["Assign the billing reader role<br/>set_billing_access"]
+    billing_role --> exports{"Billing exports?"}
+    exports -- new --> providers["Register the resource providers<br/>register_resource_providers"]
+    providers --> rg["Create the resource group<br/>set_resource_group"]
+    rg --> storage["Create the storage account<br/>set_storage_account"]
+    storage --> container["Create the blob container<br/>set_storage_container"]
+    container --> policy["Set the lifecycle policy<br/>set_storage_management_policy"]
+    policy --> export["Create the daily FOCUS cost export<br/>set_focus_cost_export"]
+    export --> writer["Assign Storage Blob Data Contributor to the export<br/>set_role_assignment"]
+    writer --> reader
+    exports -- "--existing-export" --> reader["Assign Storage Blob Data Reader to Infracost on the container<br/>set_role_assignment"]
+  end
+  exports -- "--skip-billing-exports" --> output
+  reader --> output(["Write the values for Infracost as JSON<br/>write_outputs"])
 ```
 
-Then run the same command without `--dry-run`.
+`--skip-billing-access` skips the billing reader role.
+
+### Teardown
+
+```mermaid
+flowchart TD
+  start([teardown.sh / teardown.ps1]) --> validate
+  subgraph read [Read and validate. No changes]
+    validate["Validate the options<br/>assert_arguments"]
+    validate --> client["Read the tenant and subscription of the az CLI<br/>read_client_config"]
+    client --> groups["Get the management groups<br/>read_management_groups"]
+    groups --> sp_read["Get the Infracost service principal<br/>read_service_principal"]
+    sp_read --> destination["Calculate the storage account name and export destination<br/>resolve_storage_account_name, resolve_export_destination"]
+  end
+  destination --> preflight{"Preflight: permissions OK?<br/>invoke_preflight"}
+  preflight -- no --> stop([Stop. List the missing permissions])
+  preflight -- "yes, or --skip-preflight" --> confirm{"Continue?<br/>confirm_teardown"}
+  confirm -- no --> cancel([Stop. Nothing removed])
+  confirm -- "yes, --yes or --dry-run" --> exports{"Billing exports?"}
+  subgraph remove [Removals. Printed only with --dry-run]
+    exports -- "created by setup" --> reader["Remove Storage Blob Data Reader of Infracost<br/>remove_role_assignments"]
+    reader --> writer["Remove Storage Blob Data Contributor of the export<br/>remove_role_assignments"]
+    writer --> export["Remove the FOCUS cost export<br/>remove_billing_exports"]
+    export --> keep{"--keep-storage?"}
+    keep -- no --> storage["Remove the storage account and the exported data<br/>remove_billing_exports"]
+    storage --> rg["Remove the resource group, if setup created it and it is empty<br/>remove_resource_group"]
+    exports -- "--existing-export" --> existing_reader["Remove Storage Blob Data Reader of Infracost<br/>remove_role_assignments"]
+    rg --> billing_role
+    keep -- yes --> billing_role
+    existing_reader --> billing_role
+    exports -- "--skip-billing-exports" --> billing_role["Remove the billing reader role<br/>remove_billing_access"]
+    billing_role --> mg_roles["Remove the roles on each management group<br/>remove_management_group_roles"]
+    mg_roles --> sp["Remove the service principal<br/>remove_service_principal"]
+  end
+  sp --> done([Done])
+```
+
+`--skip-billing-access` skips the billing reader role. The resource providers stay registered.
 
 ## Examples
 
-Enterprise Agreement, all subscriptions in the tenant:
-
-```bash
-./scripts/setup.sh \
-  --client-id <infracost-client-id> \
-  --billing-agreement-type EA \
-  --billing-account-id 12345678 \
-  --location westeurope
-```
-
-Some management groups only:
-
-```bash
-./scripts/setup.sh \
-  --client-id <infracost-client-id> \
-  --management-groups platform,workloads \
-  --billing-agreement-type MCA \
-  --billing-account-id '<guid>:<guid>_<yyyy-mm-dd>' \
-  --location westeurope
-```
-
-Use a FOCUS cost export that exists. The script only gives Infracost read access to the container:
-
-```bash
-./scripts/setup.sh \
-  --client-id <infracost-client-id> \
-  --skip-billing-access \
-  --existing-export '/subscriptions/<id>/resourceGroups/<rg>/providers/Microsoft.Storage/storageAccounts/<name>,<container>,<root-path>'
-```
-
-No billing access and no billing exports:
-
-```bash
-./scripts/setup.sh \
-  --client-id <infracost-client-id> \
-  --skip-billing-access \
-  --skip-billing-exports
-```
+See [`examples/`](examples/) for the bash and PowerShell commands of each use case: [`ea/`](examples/ea/) for an Enterprise Agreement, and [`mca/`](examples/mca/) for a Microsoft Customer Agreement.
 
 ## Options
 
@@ -97,7 +138,7 @@ No billing access and no billing exports:
 | `--subscription <guid>` | Subscription that hosts the billing exports. The script stops if the `az` CLI targets a different subscription. | Not checked |
 | `--management-groups <a,b>` | Management groups where Infracost gets read access. | Tenant root management group |
 | `--roles <a,b>` | Roles on the management groups. | `Reader,Cost Management Reader,Monitoring Reader` |
-| `--owners <oid,oid>` | Object IDs that own the service principal. | No owners |
+| `--owners <oid,oid>` | Object IDs to add as owners of the service principal. Existing owners are kept. | No owners |
 | `--billing-agreement-type <EA\|MCA>` | Billing agreement of the billing account. | |
 | `--billing-account-id <id>` | EA enrollment number, or MCA billing account ID. | |
 | `--skip-billing-access` | Do not assign the billing reader role. | |
@@ -155,15 +196,11 @@ The script writes its progress to stderr, and the values for Infracost to stdout
 }
 ```
 
-The keys are the same as the Terraform module outputs. To keep the values only:
-
-```bash
-./scripts/setup.sh ... > infracost-azure.json
-```
+The keys are the same as the Terraform module outputs. To keep the values only, redirect stdout to a file, for example `> infracost-azure.json`.
 
 ## What the script creates
 
-| Step | Terraform resource |
+| Step | Terraform equivalent |
 | --- | --- |
 | Service principal of the Infracost application, with tags and owners | `azuread_service_principal.infracost` |
 | Roles on each management group | `azurerm_role_assignment.infracost` |
@@ -180,34 +217,25 @@ The keys are the same as the Terraform module outputs. To keep the values only:
 
 ## Teardown
 
-Run `teardown.sh` with the same options that you gave to `setup.sh`. The script removes the items in the reverse order. It asks for confirmation before it removes items.
+Run the teardown script with the same options that you gave to the setup script. The script removes the items in the reverse order. It asks for confirmation before it removes items. Do a dry run first with `--dry-run`. To run without a terminal, for example in CI, add `--yes`.
 
-```bash
-./scripts/teardown.sh --dry-run \
-  --client-id <infracost-client-id> \
-  --billing-agreement-type MCA \
-  --billing-account-id '<guid>:<guid>_<yyyy-mm-dd>'
-```
-
-Then run the same command without `--dry-run`. To run without a terminal, for example in CI, add `--yes`.
-
-`teardown.sh` removes:
+The teardown script removes:
 
 1. The Storage Blob Data Reader role of Infracost on the container.
 2. The Storage Blob Data Contributor role of the cost export, and the FOCUS cost export.
 3. The storage account, with its container, lifecycle policy and **all exported data**. Use `--keep-storage` to keep them.
-4. The resource group, only if it has the `InfracostModuleVersion` tag from `setup.sh` and contains no other resources.
+4. The resource group, only if it has the `InfracostModuleVersion` tag from the setup script and contains no other resources.
 5. The billing reader role on the billing account.
 6. The roles on each management group.
 7. The service principal of the Infracost application in your tenant.
 
-`teardown.sh` does not unregister the resource providers, because other resources in the subscription can use them. Terraform also keeps them registered.
+The teardown script does not unregister the resource providers, because other resources in the subscription can use them. Terraform also keeps them registered.
 
-With `--existing-export`, `teardown.sh` only removes the Storage Blob Data Reader role. The export and the storage account stay.
+With `--existing-export`, the teardown script only removes the Storage Blob Data Reader role. The export and the storage account stay.
 
 ### Teardown options
 
-`teardown.sh` accepts these options of `setup.sh`: `--client-id`, `--management-groups`, `--roles`, `--billing-agreement-type`, `--billing-account-id`, `--skip-billing-access`, `--resource-group`, `--storage-account`, `--existing-export`, `--skip-billing-exports` and `--dry-run`. It also accepts:
+The teardown script accepts all options of the setup script. It ignores `--location` and `--owners`. It uses `--client-id`, `--tenant-id`, `--subscription`, `--management-groups`, `--roles`, `--billing-agreement-type`, `--billing-account-id`, `--skip-billing-access`, `--resource-group`, `--storage-account`, `--existing-export`, `--skip-billing-exports` and `--dry-run`. It also accepts:
 
 | Option | Description |
 | --- | --- |

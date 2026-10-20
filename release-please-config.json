@@ -13,7 +13,7 @@
   ],
   "packages": {
     ".": {
-      "extra-files": ["version.tf", "scripts/common.sh"]
+      "extra-files": ["version.tf", "scripts/linux/common.sh", "scripts/windows/common.ps1"]
     }
   }
 }

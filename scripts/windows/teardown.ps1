@@ -110,7 +110,12 @@ function Assert-Arguments {
 function Confirm-Teardown {
   if ($DryRun -or $Yes) { return }
   if ([Console]::IsInputRedirected) { Stop-WithError "pass -Yes to run without a terminal." }
-  $answer = Read-Host "This removes the Infracost integration from tenant $ActiveTenantId. Continue? [y/N]"
+  $prompt = if (-not $SkipBillingExports -and -not $ExistingExport -and -not $KeepStorage) {
+    "This removes the Infracost integration from tenant $ActiveTenantId and deletes storage account $StorageAccount with all exported data. Continue? [y/N]"
+  } else {
+    "This removes the Infracost integration from tenant $ActiveTenantId. Continue? [y/N]"
+  }
+  $answer = Read-Host $prompt
   if ($answer -notin @('y', 'Y', 'yes')) { Stop-WithError "cancelled." }
 }
 
@@ -218,7 +223,11 @@ function Remove-BillingExports {
   }
 
   Write-Step "Storage account $StorageAccount"
-  if (Invoke-Az -Arguments @('storage', 'account', 'show', '--ids', $ExportStorageAccountId) -AllowFailure) {
+  if (Test-ResourceExists $ExportStorageAccountId) {
+    if (-not (Get-StorageAccountVersionTag)) {
+      Write-Step "Storage account not created by setup.ps1, skipping"
+      return
+    }
     Invoke-AzMutation -Arguments @('storage', 'account', 'delete', '--ids', $ExportStorageAccountId, '--yes') | Out-Null
   }
 

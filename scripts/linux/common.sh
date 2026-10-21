@@ -107,6 +107,24 @@ invoke_az_mutation() {
   az "$@" --only-show-errors
 }
 
+# Reads the value of a command-line option. Stops if the value is missing.
+read_option_value() {
+  [ $# -ge 2 ] || stop_with_error "$1 needs a value."
+  printf '%s' "$2"
+}
+
+# Splits comma-separated values into a list.
+split_list_argument() {
+  local item joined=""
+  IFS=',' read -r -a item_list <<<"$1"
+  for item in ${item_list[@]+"${item_list[@]}"}; do
+    item="${item#"${item%%[![:space:]]*}"}"
+    item="${item%"${item##*[![:space:]]}"}"
+    [ -z "$item" ] || joined="${joined:+${joined},}${item}"
+  done
+  printf '%s' "$joined"
+}
+
 # Converts a value to lowercase.
 lowercase() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
@@ -278,6 +296,12 @@ test_resource_group_exists() {
 # Checks if an Azure resource exists.
 test_resource_exists() {
   az resource show --ids "$1" --query id -o tsv >/dev/null 2>&1
+}
+
+# Gets the version tag of the export storage account. Empty if the account does not exist or the setup script did not create it.
+get_storage_account_version_tag() {
+  az storage account show --ids "$export_storage_account_id" \
+    --query "tags.${VERSION_TAG_NAME}" -o tsv 2>/dev/null || true
 }
 
 # Records a permission that is missing.

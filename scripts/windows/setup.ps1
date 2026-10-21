@@ -41,7 +41,7 @@ Region of the storage account and cost export.
 Resource group of the storage account.
 
 .PARAMETER StorageAccount
-Name of the storage account. Default: derived from the tenant ID.
+Name of the storage account. Default: derived from the tenant ID. Must not exist, or must be created by setup.ps1.
 
 .PARAMETER ExistingExport
 Use a FOCUS cost export that exists, as <storage_account_id>,<container>,<root_path>.
@@ -121,6 +121,15 @@ function Confirm-BillingAccount {
   $actualAgreementType = $billingAccount.properties.agreementType
   if ($actualAgreementType -ne $expectedAgreementType) {
     Stop-WithError "-BillingAgreementType is $BillingAgreementType, but the billing account is $actualAgreementType."
+  }
+}
+
+# Stops if the storage account exists and the setup script did not create it.
+function Assert-StorageAccountOwner {
+  if ($SkipBillingExports -or $ExistingExport) { return }
+  if (-not (Test-ResourceExists $ExportStorageAccountId)) { return }
+  if (-not (Get-StorageAccountVersionTag)) {
+    Stop-WithError "storage account $StorageAccount exists and does not have the $VersionTagName tag. Pass -StorageAccount with a different name, or use -ExistingExport."
   }
 }
 
@@ -484,6 +493,7 @@ try {
   Resolve-StorageAccountName
   Resolve-ExportDestination
   Confirm-BillingAccount
+  Assert-StorageAccountOwner
   Invoke-Preflight
   Set-ServicePrincipal
   Set-ManagementGroupRoles

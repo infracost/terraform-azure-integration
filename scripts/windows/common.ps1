@@ -136,7 +136,8 @@ function Invoke-Az {
   }
   $text = ($output -join "`n").Trim()
   if (-not $text) { return }
-  ConvertFrom-Json -InputObject $text
+  $parsed = ConvertFrom-Json -InputObject $text
+  $parsed
 }
 
 # Formats an az command as a shell line that you can copy and run.
@@ -220,7 +221,7 @@ function Get-TomorrowUtc {
 
 # Stops if a necessary local tool is missing.
 function Assert-LocalTools {
-  if ($PSVersionTable.PSVersion.Major -lt 5) {
+  if ($PSVersionTable.PSVersion -lt [version]'5.1') {
     Stop-WithError "PowerShell 5.1 or later is required."
   }
   if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
@@ -352,6 +353,12 @@ function Test-ResourceGroupExists {
 function Test-ResourceExists {
   param([string]$ResourceId)
   $null -ne (Invoke-Az -Arguments @('resource', 'show', '--ids', $ResourceId) -AllowFailure)
+}
+
+# Gets the version tag of the export storage account. Empty if the account does not exist or the setup script did not create it.
+function Get-StorageAccountVersionTag {
+  $account = Invoke-Az -Arguments @('storage', 'account', 'show', '--ids', $ExportStorageAccountId) -AllowFailure
+  if ($account -and $account.tags) { $account.tags.$VersionTagName } else { '' }
 }
 
 # Records a permission that is missing.

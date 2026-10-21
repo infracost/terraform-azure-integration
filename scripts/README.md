@@ -63,8 +63,9 @@ flowchart TD
     groups --> sp_read["Get the Infracost service principal<br/>read_service_principal"]
     sp_read --> destination["Calculate the storage account name and export destination<br/>resolve_storage_account_name, resolve_export_destination"]
     destination --> billing_check["Check the billing agreement type<br/>confirm_billing_account"]
+    billing_check --> owner_check["Stop if the storage account exists without the version tag<br/>assert_storage_account_owner"]
   end
-  billing_check --> preflight{"Preflight: permissions OK?<br/>invoke_preflight"}
+  owner_check --> preflight{"Preflight: permissions OK?<br/>invoke_preflight"}
   preflight -- no --> stop([Stop. List the missing permissions])
   preflight -- "yes, or --skip-preflight" --> sp
   subgraph apply [Changes. Printed only with --dry-run]
@@ -110,7 +111,7 @@ flowchart TD
     reader --> writer["Remove Storage Blob Data Contributor of the export<br/>remove_role_assignments"]
     writer --> export["Remove the FOCUS cost export<br/>remove_billing_exports"]
     export --> keep{"--keep-storage?"}
-    keep -- no --> storage["Remove the storage account and the exported data<br/>remove_billing_exports"]
+    keep -- no --> storage["Remove the storage account and the exported data, if setup created it<br/>remove_billing_exports"]
     storage --> rg["Remove the resource group, if setup created it and it is empty<br/>remove_resource_group"]
     exports -- "--existing-export" --> existing_reader["Remove Storage Blob Data Reader of Infracost<br/>remove_role_assignments"]
     rg --> billing_role
@@ -144,11 +145,13 @@ See [`examples/`](examples/) for the bash and PowerShell commands of each use ca
 | `--skip-billing-access` | Do not assign the billing reader role. | |
 | `--location <region>` | Region of the storage account and cost export. | |
 | `--resource-group <name>` | Resource group of the storage account. | `infracost-billing-exports` |
-| `--storage-account <name>` | Name of the storage account. | `infracost` + 15 characters from the tenant ID hash |
+| `--storage-account <name>` | Name of the storage account. The script stops if the account exists and does not have the `InfracostModuleVersion` tag from the setup script. To use an export that exists, use `--existing-export`. | `infracost` + 15 characters from the tenant ID hash |
 | `--existing-export <id,container,path>` | Use a FOCUS cost export that exists. | |
 | `--skip-billing-exports` | Do not set up billing exports. | |
 | `--dry-run` | Print the changes. Do not apply them. | |
 | `--skip-preflight` | Do not check the permissions before the changes. | |
+
+The scripts remove the spaces around each item of a comma-separated list, and ignore empty items.
 
 `--billing-agreement-type` and `--billing-account-id` are necessary, except with `--skip-billing-access`. `--billing-account-id` and `--location` are necessary to create the billing exports.
 
@@ -223,7 +226,7 @@ The teardown script removes:
 
 1. The Storage Blob Data Reader role of Infracost on the container.
 2. The Storage Blob Data Contributor role of the cost export, and the FOCUS cost export.
-3. The storage account, with its container, lifecycle policy and **all exported data**. Use `--keep-storage` to keep them.
+3. The storage account, with its container, lifecycle policy and **all exported data**, only if it has the `InfracostModuleVersion` tag from the setup script. The confirmation prompt names the storage account. Use `--keep-storage` to keep them.
 4. The resource group, only if it has the `InfracostModuleVersion` tag from the setup script and contains no other resources.
 5. The billing reader role on the billing account.
 6. The roles on each management group.

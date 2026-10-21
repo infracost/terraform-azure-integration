@@ -67,48 +67,51 @@ read_arguments() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --client-id)
-        client_id="$2"
+        client_id="$(read_option_value "$@")"
         shift 2
         ;;
       --tenant-id)
-        tenant_id="$2"
+        tenant_id="$(read_option_value "$@")"
         shift 2
         ;;
       --subscription)
-        subscription="$2"
+        subscription="$(read_option_value "$@")"
         shift 2
         ;;
       --management-groups)
-        management_groups="$2"
+        management_groups="$(read_option_value "$@")"
         shift 2
         ;;
       --roles)
-        roles="$2"
+        roles="$(read_option_value "$@")"
         shift 2
         ;;
       --billing-agreement-type)
-        billing_agreement_type="$2"
+        billing_agreement_type="$(read_option_value "$@")"
         shift 2
         ;;
       --billing-account-id)
-        billing_account_id="$2"
+        billing_account_id="$(read_option_value "$@")"
         shift 2
         ;;
       --skip-billing-access)
         skip_billing_access=true
         shift
         ;;
-      --location | --owners) shift 2 ;;
+      --location | --owners)
+        read_option_value "$@" >/dev/null
+        shift 2
+        ;;
       --resource-group)
-        resource_group="$2"
+        resource_group="$(read_option_value "$@")"
         shift 2
         ;;
       --storage-account)
-        storage_account="$2"
+        storage_account="$(read_option_value "$@")"
         shift 2
         ;;
       --existing-export)
-        existing_export="$2"
+        existing_export="$(read_option_value "$@")"
         shift 2
         ;;
       --keep-storage)
@@ -145,9 +148,11 @@ read_arguments() {
 
 # Stops if an option is missing or not valid.
 assert_arguments() {
+  management_groups="$(split_list_argument "$management_groups")"
+  roles="$(split_list_argument "$roles")"
   [[ "$client_id" =~ $GUID_PATTERN ]] || stop_with_error "--client-id must be a GUID."
   assert_tenant_and_subscription_arguments
-  [[ "$roles" =~ [^,[:space:]] ]] || stop_with_error "--roles must contain at least one role."
+  [ -n "$roles" ] || stop_with_error "--roles must contain at least one role."
   assert_billing_arguments
   [ -z "$existing_export" ] || read_existing_export
   assert_storage_account_name
@@ -158,7 +163,12 @@ confirm_teardown() {
   local answer
   [ "$dry_run" = false ] && [ "$yes" = false ] || return 0
   [ -t 0 ] || stop_with_error "pass --yes to run without a terminal."
-  printf 'This removes the Infracost integration from tenant %s. Continue? [y/N] ' "$active_tenant_id" >&2
+  if [ "$skip_billing_exports" = false ] && [ -z "$existing_export" ] && [ "$keep_storage" = false ]; then
+    printf 'This removes the Infracost integration from tenant %s and deletes storage account %s with all exported data. Continue? [y/N] ' \
+      "$active_tenant_id" "$storage_account" >&2
+  else
+    printf 'This removes the Infracost integration from tenant %s. Continue? [y/N] ' "$active_tenant_id" >&2
+  fi
   read -r answer
   case "$answer" in
     y | Y | yes) ;;
@@ -210,13 +220,14 @@ invoke_preflight() {
 
 # Removes the role assignments of a principal on a scope.
 remove_role_assignments() {
-  local scope="$1" role="$2" principal_id="$3" assignment_id
+  local scope="$1" role="$2" principal_id="$3" assignment_id assignment_scope
   [ -n "$principal_id" ] || return 0
-  while read -r assignment_id; do
+  while IFS=$'\t' read -r assignment_id assignment_scope; do
     [ -n "$assignment_id" ] || continue
+    [ "$(lowercase "$assignment_scope")" = "$(lowercase "$scope")" ] || continue
     invoke_az_mutation role assignment delete --ids "$assignment_id"
   done < <(az role assignment list --assignee "$principal_id" --scope "$scope" --role "$role" \
-    --query "[?scope=='${scope}'].id" -o tsv 2>/dev/null || true)
+    --query "[].[id, scope]" -o tsv 2>/dev/null || true)
 }
 
 # Removes the resource group, only if the setup script created it and it contains no other resources.
@@ -242,7 +253,7 @@ remove_resource_group() {
 
 # Removes the storage roles, the cost export and the storage account.
 remove_billing_exports() {
-  local container_resource_id export_url export_principal_id
+  local container_resource_id export_url export_id export_principal_id
   [ "$skip_billing_exports" = false ] || return 0
 
   container_resource_id="${export_storage_account_id}/blobServices/default/containers/${export_container}"
@@ -252,13 +263,14 @@ remove_billing_exports() {
   [ -z "$existing_export" ] || return 0
 
   export_url="/providers/Microsoft.Billing/billingAccounts/${billing_account_id}/providers/Microsoft.CostManagement/exports/${EXPORT_NAME}?api-version=${COST_MANAGEMENT_API_VERSION}"
-  export_principal_id="$(az rest --method GET --url "$export_url" --query identity.principalId -o tsv 2>/dev/null || true)"
+  read -r export_id export_principal_id < <(az rest --method GET --url "$export_url" \
+    --query "join(' ', [id, identity.principalId || ''])" -o tsv 2>/dev/null || true) || true
 
   write_step "Role Storage Blob Data Contributor on storage account for the cost export"
   remove_role_assignments "$export_storage_account_id" "Storage Blob Data Contributor" "$export_principal_id"
 
   write_step "FOCUS cost export ${EXPORT_NAME}"
-  [ -z "$export_principal_id" ] || invoke_az_mutation rest --method DELETE --url "$export_url"
+  [ -z "$export_id" ] || invoke_az_mutation rest --method DELETE --url "$export_url"
 
   [ "$keep_storage" = false ] || {
     write_step "Keeping storage account ${storage_account}"
@@ -266,7 +278,11 @@ remove_billing_exports() {
   }
 
   write_step "Storage account ${storage_account}"
-  if az storage account show --ids "$export_storage_account_id" --query id -o tsv >/dev/null 2>&1; then
+  if test_resource_exists "$export_storage_account_id"; then
+    [ -n "$(get_storage_account_version_tag)" ] || {
+      write_step "Storage account not created by setup.sh, skipping"
+      return 0
+    }
     invoke_az_mutation storage account delete --ids "$export_storage_account_id" --yes
   fi
 

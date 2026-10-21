@@ -56,7 +56,7 @@ Billing access:
 Billing exports:
   --location <region>                 Region of the storage account and cost export.
   --resource-group <name>             Default: ${DEFAULT_RESOURCE_GROUP}.
-  --storage-account <name>            Default: derived from the tenant ID.
+  --storage-account <name>            Default: derived from the tenant ID. Must not exist, or must be created by setup.sh.
   --existing-export <storage_account_id,container,root_path>
                                       Use an existing FOCUS cost export. Only the blob reader role is assigned.
   --skip-billing-exports              Do not set up billing exports.
@@ -73,35 +73,35 @@ read_arguments() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --client-id)
-        client_id="$2"
+        client_id="$(read_option_value "$@")"
         shift 2
         ;;
       --tenant-id)
-        tenant_id="$2"
+        tenant_id="$(read_option_value "$@")"
         shift 2
         ;;
       --subscription)
-        subscription="$2"
+        subscription="$(read_option_value "$@")"
         shift 2
         ;;
       --management-groups)
-        management_groups="$2"
+        management_groups="$(read_option_value "$@")"
         shift 2
         ;;
       --roles)
-        roles="$2"
+        roles="$(read_option_value "$@")"
         shift 2
         ;;
       --owners)
-        owners="$2"
+        owners="$(read_option_value "$@")"
         shift 2
         ;;
       --billing-agreement-type)
-        billing_agreement_type="$2"
+        billing_agreement_type="$(read_option_value "$@")"
         shift 2
         ;;
       --billing-account-id)
-        billing_account_id="$2"
+        billing_account_id="$(read_option_value "$@")"
         shift 2
         ;;
       --skip-billing-access)
@@ -109,19 +109,19 @@ read_arguments() {
         shift
         ;;
       --location)
-        location="$2"
+        location="$(read_option_value "$@")"
         shift 2
         ;;
       --resource-group)
-        resource_group="$2"
+        resource_group="$(read_option_value "$@")"
         shift 2
         ;;
       --storage-account)
-        storage_account="$2"
+        storage_account="$(read_option_value "$@")"
         shift 2
         ;;
       --existing-export)
-        existing_export="$2"
+        existing_export="$(read_option_value "$@")"
         shift 2
         ;;
       --skip-billing-exports)
@@ -151,9 +151,12 @@ read_arguments() {
 # Stops if an option is missing or not valid.
 assert_arguments() {
   local owner
+  management_groups="$(split_list_argument "$management_groups")"
+  roles="$(split_list_argument "$roles")"
+  owners="$(split_list_argument "$owners")"
   [[ "$client_id" =~ $GUID_PATTERN ]] || stop_with_error "--client-id must be a GUID."
   assert_tenant_and_subscription_arguments
-  [[ "$roles" =~ [^,[:space:]] ]] || stop_with_error "--roles must contain at least one role."
+  [ -n "$roles" ] || stop_with_error "--roles must contain at least one role."
   if [ "$skip_billing_exports" = false ] && [ -z "$existing_export" ] && [ -z "$location" ]; then
     stop_with_error "--location is required to create the billing exports."
   fi
@@ -164,6 +167,14 @@ assert_arguments() {
   for owner in ${owner_list[@]+"${owner_list[@]}"}; do
     [[ "$owner" =~ $GUID_PATTERN ]] || stop_with_error "--owners must contain object ID GUIDs."
   done
+}
+
+# Stops if the storage account exists and the setup script did not create it.
+assert_storage_account_owner() {
+  [ "$skip_billing_exports" = false ] && [ -z "$existing_export" ] || return 0
+  test_resource_exists "$export_storage_account_id" || return 0
+  [ -n "$(get_storage_account_version_tag)" ] \
+    || stop_with_error "storage account ${storage_account} exists and does not have the ${VERSION_TAG_NAME} tag. Pass --storage-account with a different name, or use --existing-export."
 }
 
 # Stops if the billing account does not have the given billing agreement type.
@@ -554,6 +565,7 @@ main() {
   resolve_storage_account_name
   resolve_export_destination
   confirm_billing_account
+  assert_storage_account_owner
   invoke_preflight
   set_service_principal
   set_management_group_roles

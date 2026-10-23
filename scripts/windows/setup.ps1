@@ -154,14 +154,19 @@ function Invoke-PreflightBillingExportsStorage {
 
   if (Test-ResourceExists $ExportStorageAccountId) { return }
   $nameCheck = Invoke-Az -Arguments @('storage', 'account', 'check-name', '--name', $StorageAccount) -AllowFailure
-  if ($nameCheck -and $nameCheck.nameAvailable -eq $false) {
+  if (-not $nameCheck) {
+    Add-UncheckedPermission "Storage account name: cannot check if $StorageAccount is available"
+  } elseif ($nameCheck.nameAvailable -eq $false) {
     Add-PreflightFailure "Storage account name $StorageAccount is in use. Pass -StorageAccount with a different name"
+  } else {
+    Add-PreflightPass "Storage account name $StorageAccount is available"
   }
 }
 
 # Checks that the existing export storage account exists and that you can assign roles on it.
 function Invoke-PreflightExistingExport {
   if (Test-ResourceExists $ExistingStorageAccountId) {
+    Add-PreflightPass "Existing export: storage account $ExistingStorageAccountId exists"
     Assert-ArmActions $ExistingStorageAccountId "Blob reader role on the existing export" @('Microsoft.Authorization/roleAssignments/write')
   } else {
     Add-PreflightFailure "Existing export: storage account $ExistingStorageAccountId not found"
@@ -296,7 +301,8 @@ function Set-BillingAccountReader {
 
 # Registers the resource providers that the storage account and cost export need.
 function Register-ResourceProviders {
-  foreach ($namespace in @(Get-UnregisteredResourceProviders)) {
+  $unregisteredResourceProviders = @(Get-UnregisteredResourceProviders)
+  foreach ($namespace in $unregisteredResourceProviders) {
     Write-Step "Resource provider $namespace"
     Invoke-AzMutation -Arguments @(
       'provider', 'register',

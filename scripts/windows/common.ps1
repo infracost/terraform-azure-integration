@@ -62,6 +62,7 @@ $ExistingRootPath = ''
 $ExportStorageAccountId = ''
 $ExportContainer = ''
 $ExportRootPath = ''
+$PreflightPasses = New-Object System.Collections.Generic.List[string]
 $PreflightFailures = New-Object System.Collections.Generic.List[string]
 $PreflightUnchecked = New-Object System.Collections.Generic.List[string]
 $TemporaryFiles = New-Object System.Collections.Generic.List[string]
@@ -361,6 +362,12 @@ function Get-StorageAccountVersionTag {
   if ($account -and $account.tags) { $account.tags.$VersionTagName } else { '' }
 }
 
+# Records a permission that the preflight confirmed.
+function Add-PreflightPass {
+  param([string]$Message)
+  $PreflightPasses.Add($Message)
+}
+
 # Records a permission that is missing.
 function Add-PreflightFailure {
   param([string]$Message)
@@ -405,7 +412,9 @@ function Assert-ArmActions {
     return
   }
   foreach ($action in $Actions) {
-    if (-not (Test-ArmActionAllowed $action $permissions.value)) {
+    if (Test-ArmActionAllowed $action $permissions.value) {
+      Add-PreflightPass "${Description}: $action on $Scope"
+    } else {
       Add-PreflightFailure "${Description}: $action on $Scope"
     }
   }
@@ -426,7 +435,7 @@ function Assert-BillingActions {
     $decision = @($accessDecisions) | Where-Object { $_.action -eq $action } | Select-Object -First 1
     $accessDecision = if ($decision) { $decision.accessDecision } else { '' }
     switch ($accessDecision) {
-      'Allowed' { }
+      'Allowed' { Add-PreflightPass "${Description}: $action on billing account $BillingAccountId" }
       'NotAllowed' { Add-PreflightFailure "${Description}: $action on billing account $BillingAccountId" }
       default { Add-UncheckedPermission "${Description}: no access decision for $action on billing account $BillingAccountId" }
     }
@@ -441,8 +450,14 @@ function Assert-ServicePrincipalManagement {
     $grants = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', "$callerPath/appRoleAssignments?`$select=appRoleId") -AllowFailure
     if ($null -ne $grants) {
       $grantedAppRoleIds = @($grants.value | ForEach-Object { $_.appRoleId })
-      if ($grantedAppRoleIds -contains $GraphApplicationReadWriteAllRoleId) { return }
-      if (-not $TargetObjectId -and $grantedAppRoleIds -contains $GraphApplicationReadWriteOwnedByRoleId) { return }
+      if ($grantedAppRoleIds -contains $GraphApplicationReadWriteAllRoleId) {
+        Add-PreflightPass "${Description}: Application.ReadWrite.All"
+        return
+      }
+      if (-not $TargetObjectId -and $grantedAppRoleIds -contains $GraphApplicationReadWriteOwnedByRoleId) {
+        Add-PreflightPass "${Description}: Application.ReadWrite.OwnedBy"
+        return
+      }
     }
   } else {
     $callerPath = "$GraphUrl/me"
@@ -455,14 +470,20 @@ function Assert-ServicePrincipalManagement {
     return
   }
   $roleTemplateIds = @($directoryRoles.value | ForEach-Object { $_.roleTemplateId })
-  if (@($roleTemplateIds | Where-Object { $ApplicationManagerRoleTemplateIds -contains $_ }).Count -gt 0) { return }
+  if (@($roleTemplateIds | Where-Object { $ApplicationManagerRoleTemplateIds -contains $_ }).Count -gt 0) {
+    Add-PreflightPass "${Description}: Application Administrator, Cloud Application Administrator or Global Administrator directory role"
+    return
+  }
 
   if ($TargetObjectId) {
     $caller = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', "${callerPath}?`$select=id") -AllowFailure
     $ownersUrl = "$GraphUrl/servicePrincipals/$TargetObjectId/owners?`$select=id"
     $owners = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', $ownersUrl) -AllowFailure
     $ownerIds = @($owners.value | ForEach-Object { $_.id })
-    if ($caller -and $ownerIds -contains $caller.id) { return }
+    if ($caller -and $ownerIds -contains $caller.id) {
+      Add-PreflightPass "${Description}: owner of the service principal"
+      return
+    }
   }
 
   Add-PreflightFailure "${Description}: Application Administrator, Cloud Application Administrator or Global Administrator directory role, Application.ReadWrite.All, or ownership of the service principal"
@@ -478,6 +499,10 @@ function Assert-ManagementGroupRolePermissions {
 
 # Writes the preflight result. Stops if a permission is missing.
 function Write-PreflightReport {
+  if ($PreflightPasses.Count -gt 0) {
+    Write-Step "Preflight checks that passed:"
+    foreach ($item in $PreflightPasses) { [Console]::Error.WriteLine("  - $item") }
+  }
   if ($PreflightUnchecked.Count -gt 0) {
     Write-Step "Preflight could not check these items. The run can still fail on them:"
     foreach ($item in $PreflightUnchecked) { [Console]::Error.WriteLine("  - $item") }

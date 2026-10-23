@@ -216,13 +216,17 @@ invoke_preflight_billing_exports_storage() {
 
   test_resource_exists "$export_storage_account_id" && return 0
   name_available="$(az storage account check-name --name "$storage_account" --query nameAvailable -o tsv 2>/dev/null || true)"
-  [ "$name_available" != false ] \
-    || add_preflight_failure "Storage account name ${storage_account} is in use. Pass --storage-account with a different name"
+  case "$name_available" in
+    true) add_preflight_pass "Storage account name ${storage_account} is available" ;;
+    false) add_preflight_failure "Storage account name ${storage_account} is in use. Pass --storage-account with a different name" ;;
+    *) add_unchecked_permission "Storage account name: cannot check if ${storage_account} is available" ;;
+  esac
 }
 
 # Checks that the existing export storage account exists and that you can assign roles on it.
 invoke_preflight_existing_export() {
   if test_resource_exists "$existing_storage_account_id"; then
+    add_preflight_pass "Existing export: storage account ${existing_storage_account_id} exists"
     assert_arm_actions "$existing_storage_account_id" "Blob reader role on the existing export" \
       Microsoft.Authorization/roleAssignments/write
   else

@@ -157,7 +157,7 @@ The scripts remove the spaces around each item of a comma-separated list, and ig
 
 ## Preflight
 
-Before the first change, each script checks that the signed-in principal can do all the steps. The preflight also runs with `--dry-run`. If an item fails, the script lists all failed items and stops before it changes anything.
+Before the first change, each script checks that the signed-in principal can do all the steps. The preflight also runs with `--dry-run`. The script lists each check that passed, each check that it could not do, and each check that failed. If an item fails, the script stops before it changes anything.
 
 | Step | Check |
 | --- | --- |

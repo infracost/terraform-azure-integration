@@ -63,6 +63,7 @@ existing_root_path=""
 export_storage_account_id=""
 export_container=""
 export_root_path=""
+preflight_passes=""
 preflight_failures=""
 preflight_unchecked=""
 
@@ -304,6 +305,11 @@ get_storage_account_version_tag() {
     --query "tags.${VERSION_TAG_NAME}" -o tsv 2>/dev/null || true
 }
 
+# Records a permission that the preflight confirmed.
+add_preflight_pass() {
+  preflight_passes="${preflight_passes}  - $*"$'\n'
+}
+
 # Records a permission that is missing.
 add_preflight_failure() {
   preflight_failures="${preflight_failures}  - $*"$'\n'
@@ -359,8 +365,11 @@ assert_arm_actions() {
     return 0
   fi
   for action in "$@"; do
-    test_arm_action_allowed "$action" "$permission_entries" \
-      || add_preflight_failure "${description}: ${action} on ${scope}"
+    if test_arm_action_allowed "$action" "$permission_entries"; then
+      add_preflight_pass "${description}: ${action} on ${scope}"
+    else
+      add_preflight_failure "${description}: ${action} on ${scope}"
+    fi
   done
 }
 
@@ -381,7 +390,7 @@ assert_billing_actions() {
   for action in "$@"; do
     access_decision="$(awk -F'|' -v action="$action" 'tolower($1) == tolower(action) { print $2 }' <<<"$access_decisions")"
     case "$access_decision" in
-      Allowed) ;;
+      Allowed) add_preflight_pass "${description}: ${action} on billing account ${billing_account_id}" ;;
       NotAllowed) add_preflight_failure "${description}: ${action} on billing account ${billing_account_id}" ;;
       *) add_unchecked_permission "${description}: no access decision for ${action} on billing account ${billing_account_id}" ;;
     esac
@@ -395,8 +404,14 @@ assert_service_principal_management() {
     caller_path="${GRAPH_URL}/servicePrincipals(appId='${signed_in_principal_name}')"
     if granted_app_roles="$(az rest --method GET --url "${caller_path}/appRoleAssignments?\$select=appRoleId" \
       --query "value[].appRoleId" -o tsv 2>/dev/null)"; then
-      test_lines_contain_any "$granted_app_roles" "$GRAPH_APPLICATION_READ_WRITE_ALL_ROLE_ID" && return 0
-      [ -z "$target_object_id" ] && test_lines_contain_any "$granted_app_roles" "$GRAPH_APPLICATION_READ_WRITE_OWNED_BY_ROLE_ID" && return 0
+      if test_lines_contain_any "$granted_app_roles" "$GRAPH_APPLICATION_READ_WRITE_ALL_ROLE_ID"; then
+        add_preflight_pass "${description}: Application.ReadWrite.All"
+        return 0
+      fi
+      if [ -z "$target_object_id" ] && test_lines_contain_any "$granted_app_roles" "$GRAPH_APPLICATION_READ_WRITE_OWNED_BY_ROLE_ID"; then
+        add_preflight_pass "${description}: Application.ReadWrite.OwnedBy"
+        return 0
+      fi
     fi
   else
     caller_path="${GRAPH_URL}/me"
@@ -408,13 +423,19 @@ assert_service_principal_management() {
     add_unchecked_permission "${description}: cannot read the directory roles of the signed-in principal"
     return 0
   fi
-  test_lines_contain_any "$directory_roles" "$APPLICATION_MANAGER_ROLE_TEMPLATE_IDS" && return 0
+  if test_lines_contain_any "$directory_roles" "$APPLICATION_MANAGER_ROLE_TEMPLATE_IDS"; then
+    add_preflight_pass "${description}: Application Administrator, Cloud Application Administrator or Global Administrator directory role"
+    return 0
+  fi
 
   if [ -n "$target_object_id" ]; then
     caller_object_id="$(az rest --method GET --url "${caller_path}?\$select=id" --query id -o tsv 2>/dev/null || true)"
     owner_ids="$(az rest --method GET --url "${GRAPH_URL}/servicePrincipals/${target_object_id}/owners?\$select=id" \
       --query "value[].id" -o tsv 2>/dev/null || true)"
-    [ -n "$caller_object_id" ] && test_lines_contain_any "$owner_ids" "$caller_object_id" && return 0
+    if [ -n "$caller_object_id" ] && test_lines_contain_any "$owner_ids" "$caller_object_id"; then
+      add_preflight_pass "${description}: owner of the service principal"
+      return 0
+    fi
   fi
 
   add_preflight_failure "${description}: Application Administrator, Cloud Application Administrator or Global Administrator directory role, Application.ReadWrite.All, or ownership of the service principal"
@@ -431,6 +452,10 @@ assert_management_group_role_permissions() {
 
 # Writes the preflight result. Stops if a permission is missing.
 write_preflight_report() {
+  if [ -n "$preflight_passes" ]; then
+    write_step "Preflight checks that passed:"
+    printf '%s' "$preflight_passes" >&2
+  fi
   if [ -n "$preflight_unchecked" ]; then
     write_step "Preflight could not check these items. The run can still fail on them:"
     printf '%s' "$preflight_unchecked" >&2

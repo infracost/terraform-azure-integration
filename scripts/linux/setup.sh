@@ -412,7 +412,9 @@ set_storage_account() {
     --resource-group "$resource_group" --location "$location" \
     --sku "$STORAGE_ACCOUNT_SKU" --kind StorageV2 --min-tls-version TLS1_2 --https-only true \
     --allow-blob-public-access false --allow-shared-key-access false \
-    --default-to-oauth-authentication true --tags "${VERSION_TAG_NAME}=${SCRIPT_VERSION}" >/dev/null
+    --tags "${VERSION_TAG_NAME}=${SCRIPT_VERSION}" >/dev/null
+  invoke_az_mutation storage account update --name "$storage_account" \
+    --resource-group "$resource_group" --set defaultToOAuthAuthentication=true >/dev/null
 }
 
 # Creates the blob container for the cost export, if it does not exist.

@@ -346,8 +346,13 @@ function Set-StorageAccount {
     '--https-only', 'true',
     '--allow-blob-public-access', 'false',
     '--allow-shared-key-access', 'false',
-    '--default-to-oauth-authentication', 'true',
     '--tags', "$VersionTagName=$ScriptVersion"
+  ) | Out-Null
+  Invoke-AzMutation -Arguments @(
+    'storage', 'account', 'update',
+    '--name', $StorageAccount,
+    '--resource-group', $ResourceGroup,
+    '--set', 'defaultToOAuthAuthentication=true'
   ) | Out-Null
 }
 

@@ -67,6 +67,7 @@ $ExportStorageAccountId = ''
 $ExportContainer = ''
 $ExportRootPath = ''
 $PreflightPasses = New-Object System.Collections.Generic.List[string]
+$StepWritten = $false
 $PreflightFailures = New-Object System.Collections.Generic.List[string]
 $PreflightUnchecked = New-Object System.Collections.Generic.List[string]
 $TemporaryFiles = New-Object System.Collections.Generic.List[string]
@@ -74,6 +75,8 @@ $TemporaryFiles = New-Object System.Collections.Generic.List[string]
 # Writes a progress line to stderr.
 function Write-Step {
   param([string]$Message)
+  if ($script:StepWritten) { [Console]::Error.WriteLine() }
+  $script:StepWritten = $true
   [Console]::Error.WriteLine("==> $Message")
 }
 

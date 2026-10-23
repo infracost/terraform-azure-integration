@@ -68,11 +68,14 @@ export_storage_account_id=""
 export_container=""
 export_root_path=""
 preflight_passes=""
+step_written=false
 preflight_failures=""
 preflight_unchecked=""
 
 # Writes a progress line to stderr.
 write_step() {
+  [ "$step_written" = false ] || printf '\n' >&2
+  step_written=true
   printf '==> %s\n' "$*" >&2
 }
 

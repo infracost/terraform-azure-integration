@@ -110,6 +110,7 @@ function Assert-Arguments {
 function Confirm-Teardown {
   if ($DryRun -or $Yes) { return }
   if ([Console]::IsInputRedirected) { Stop-WithError "pass -Yes to run without a terminal." }
+  [Console]::Error.WriteLine()
   $prompt = if (-not $SkipBillingExports -and -not $ExistingExport -and -not $KeepStorage) {
     "This removes the Infracost integration from tenant $ActiveTenantId and deletes storage account $StorageAccount with all exported data. Continue? [y/N]"
   } else {

@@ -163,6 +163,7 @@ confirm_teardown() {
   local answer
   [ "$dry_run" = false ] && [ "$yes" = false ] || return 0
   [ -t 0 ] || stop_with_error "pass --yes to run without a terminal."
+  printf '\n' >&2
   if [ "$skip_billing_exports" = false ] && [ -z "$existing_export" ] && [ "$keep_storage" = false ]; then
     printf 'This removes the Infracost integration from tenant %s and deletes storage account %s with all exported data. Continue? [y/N] ' \
       "$active_tenant_id" "$storage_account" >&2

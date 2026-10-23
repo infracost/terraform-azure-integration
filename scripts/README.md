@@ -167,7 +167,7 @@ Before the first change, each script checks that the signed-in principal can do 
 | Resource providers | `<namespace>/register/action` on the subscription, only for providers that are not registered |
 | Billing exports storage | Write actions for the resource group, storage account, container, lifecycle policy and role assignments. Delete actions for teardown. |
 | Storage account name | Name is free, if the storage account does not exist yet |
-| FOCUS cost export | Billing account owner (MCA) or Enterprise Administrator (EA) role on the billing account, for the signed-in principal |
+| FOCUS cost export | Billing account owner (MCA) or Enterprise Administrator (EA) role on the billing account, for the signed-in principal. With `--skip-billing-access`, the agreement type comes from the billing account |
 | Existing export | Storage account exists, and `roleAssignments/write` on it |
 
 The preflight cannot find these problems, so the run can still fail on them:

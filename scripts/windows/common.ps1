@@ -444,29 +444,62 @@ function Get-SignedInObjectId {
   if ($caller) { $caller.id }
 }
 
+# Gets the billing agreement type from the arguments, or from the billing account if the arguments do not give it.
+function Get-BillingAgreementType {
+  if ($BillingAgreementType) { return $BillingAgreementType }
+  $billingAccountUrl = "/providers/Microsoft.Billing/billingAccounts/${BillingAccountId}?api-version=$BillingApiVersion"
+  $billingAccount = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', $billingAccountUrl) -AllowFailure
+  if ($null -eq $billingAccount) { return }
+  switch ($billingAccount.properties.agreementType) {
+    $EaAgreementType { 'EA' }
+    $McaAgreementType { 'MCA' }
+  }
+}
+
+# Gets the billing role definition IDs of a principal on the billing account, from all the pages.
+function Get-BillingRoleDefinitionId {
+  param([string]$PrincipalObjectId)
+  $pageUrl = "/providers/Microsoft.Billing/billingAccounts/$BillingAccountId/billingRoleAssignments?api-version=$BillingApiVersion"
+  $roleDefinitionIds = [System.Collections.Generic.List[string]]::new()
+  while ($pageUrl) {
+    $page = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', $pageUrl) -AllowFailure
+    if ($null -eq $page) { return $null }
+    foreach ($roleAssignment in @($page.value)) {
+      if ($roleAssignment.properties.principalId -eq $PrincipalObjectId) {
+        $roleDefinitionIds.Add($roleAssignment.properties.roleDefinitionId)
+      }
+    }
+    $pageUrl = $page.nextLink
+  }
+  , $roleDefinitionIds.ToArray()
+}
+
 # Checks that the signed-in principal has the billing account role that the billing steps need.
 function Assert-BillingAccountRole {
   param([string]$Description)
-  if ($BillingAgreementType -eq 'EA') {
-    $requiredRoleDefinitionId = $EaAdministratorRoleDefinitionId
-    $requiredRoleName = 'Enterprise Administrator'
-  } else {
-    $requiredRoleDefinitionId = $McaOwnerRoleDefinitionId
-    $requiredRoleName = 'Billing account owner'
+  switch (Get-BillingAgreementType) {
+    'EA' {
+      $requiredRoleDefinitionId = $EaAdministratorRoleDefinitionId
+      $requiredRoleName = 'Enterprise Administrator'
+    }
+    'MCA' {
+      $requiredRoleDefinitionId = $McaOwnerRoleDefinitionId
+      $requiredRoleName = 'Billing account owner'
+    }
+    default {
+      Add-UncheckedPermission "${Description}: cannot read the agreement type of billing account $BillingAccountId"
+      return
+    }
   }
   $callerObjectId = Get-SignedInObjectId
-  $roleAssignments = $null
+  $callerRoleDefinitionIds = $null
   if ($callerObjectId) {
-    $roleAssignmentsUrl = "/providers/Microsoft.Billing/billingAccounts/$BillingAccountId/billingRoleAssignments?api-version=$BillingApiVersion"
-    $roleAssignments = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', $roleAssignmentsUrl) -AllowFailure
+    $callerRoleDefinitionIds = Get-BillingRoleDefinitionId -PrincipalObjectId $callerObjectId
   }
-  if ($null -eq $roleAssignments) {
+  if ($null -eq $callerRoleDefinitionIds) {
     Add-UncheckedPermission "${Description}: cannot read the billing role assignments on billing account $BillingAccountId"
     return
   }
-  $callerRoleDefinitionIds = @($roleAssignments.value |
-      Where-Object { $_.properties.principalId -eq $callerObjectId } |
-      ForEach-Object { $_.properties.roleDefinitionId })
   if (@($callerRoleDefinitionIds | Where-Object { $_ -like "*/$requiredRoleDefinitionId" }).Count -gt 0) {
     Add-PreflightPass "${Description}: $requiredRoleName on billing account $BillingAccountId"
   } else {

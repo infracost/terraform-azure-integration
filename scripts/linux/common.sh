@@ -393,20 +393,52 @@ get_signed_in_object_id() {
   az rest --method GET --url "${caller_path}?\$select=id" --query id -o tsv 2>/dev/null || true
 }
 
+# Gets the billing agreement type from the arguments, or from the billing account if the arguments do not give it.
+get_billing_agreement_type() {
+  if [ -n "$billing_agreement_type" ]; then
+    printf '%s' "$billing_agreement_type"
+    return 0
+  fi
+  case "$(az rest --method GET \
+    --url "/providers/Microsoft.Billing/billingAccounts/${billing_account_id}?api-version=${BILLING_API_VERSION}" \
+    --query properties.agreementType -o tsv 2>/dev/null)" in
+    "$EA_AGREEMENT_TYPE") printf EA ;;
+    "$MCA_AGREEMENT_TYPE") printf MCA ;;
+  esac
+}
+
+# Gets the billing role definition IDs of a principal on the billing account, from all the pages.
+get_billing_role_definition_ids() {
+  local principal_object_id="$1" page_url page page_role_definition_ids
+  page_url="/providers/Microsoft.Billing/billingAccounts/${billing_account_id}/billingRoleAssignments?api-version=${BILLING_API_VERSION}"
+  while [ -n "$page_url" ]; do
+    page="$(az rest --method GET --url "$page_url" \
+      --query "join('|', [nextLink || '', join(',', (value || \`[]\`)[?properties.principalId=='${principal_object_id}'].properties.roleDefinitionId)])" \
+      -o tsv 2>/dev/null)" || return 1
+    IFS='|' read -r page_url page_role_definition_ids <<<"$page"
+    [ -z "$page_role_definition_ids" ] || tr ',' '\n' <<<"$page_role_definition_ids"
+  done
+}
+
 # Checks that the signed-in principal has the billing account role that the billing steps need.
 assert_billing_account_role() {
   local description="$1" required_role_definition_id required_role_name caller_object_id role_definition_ids
-  if [ "$billing_agreement_type" = EA ]; then
-    required_role_definition_id="$EA_ADMINISTRATOR_ROLE_DEFINITION_ID"
-    required_role_name="Enterprise Administrator"
-  else
-    required_role_definition_id="$MCA_OWNER_ROLE_DEFINITION_ID"
-    required_role_name="Billing account owner"
-  fi
+  case "$(get_billing_agreement_type)" in
+    EA)
+      required_role_definition_id="$EA_ADMINISTRATOR_ROLE_DEFINITION_ID"
+      required_role_name="Enterprise Administrator"
+      ;;
+    MCA)
+      required_role_definition_id="$MCA_OWNER_ROLE_DEFINITION_ID"
+      required_role_name="Billing account owner"
+      ;;
+    *)
+      add_unchecked_permission "${description}: cannot read the agreement type of billing account ${billing_account_id}"
+      return 0
+      ;;
+  esac
   caller_object_id="$(get_signed_in_object_id)"
-  if [ -z "$caller_object_id" ] || ! role_definition_ids="$(az rest --method GET \
-    --url "/providers/Microsoft.Billing/billingAccounts/${billing_account_id}/billingRoleAssignments?api-version=${BILLING_API_VERSION}" \
-    --query "value[?properties.principalId=='${caller_object_id}'].properties.roleDefinitionId" -o tsv 2>/dev/null)"; then
+  if [ -z "$caller_object_id" ] || ! role_definition_ids="$(get_billing_role_definition_ids "$caller_object_id")"; then
     add_unchecked_permission "${description}: cannot read the billing role assignments on billing account ${billing_account_id}"
     return 0
   fi

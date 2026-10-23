@@ -79,6 +79,11 @@ write_step() {
   printf '==> %s\n' "$*" >&2
 }
 
+# Writes a detail line under the current step to stderr.
+write_step_detail() {
+  printf '  - %s\n' "$*" >&2
+}
+
 # Writes an error to stderr and stops the script.
 stop_with_error() {
   printf 'error: %s\n' "$*" >&2

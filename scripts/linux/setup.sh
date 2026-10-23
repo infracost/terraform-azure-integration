@@ -271,6 +271,8 @@ set_service_principal() {
   if [ -z "$service_principal_object_id" ]; then
     service_principal_object_id="$(invoke_az_mutation --dry-run-result "<service-principal-object-id>" \
       ad sp create --id "$client_id" --query id -o tsv)"
+  else
+    write_step_detail "exists, skipping creation"
   fi
 
   tags_body="$(
@@ -293,7 +295,10 @@ EOF
     --url "${GRAPH_URL}/servicePrincipals/${service_principal_object_id}/owners?\$select=id" \
     --query "value[].id" -o tsv 2>/dev/null || true)"
   for owner in "${owner_list[@]}"; do
-    grep -qx "$owner" <<<"$existing_owner_ids" && continue
+    if grep -qx "$owner" <<<"$existing_owner_ids"; then
+      write_step_detail "owner ${owner} exists, skipping"
+      continue
+    fi
     owner_body="$(
       cat <<EOF
 {
@@ -317,6 +322,8 @@ set_role_assignment() {
     assignment_id="$(invoke_az_mutation --dry-run-result "<role-assignment-id>" \
       role assignment create --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal \
       --role "$role" --scope "$scope" --description "$description" --query id -o tsv)" || return 1
+  else
+    write_step_detail "exists, skipping"
   fi
   printf '%s\n' "$assignment_id"
 }
@@ -379,7 +386,10 @@ set_billing_account_reader() {
   billing_role_assignment_id="$(az rest --method GET \
     --url "${assignment_resource_id}?api-version=${BILLING_API_VERSION}" \
     --query id -o tsv 2>/dev/null || true)"
-  [ -z "$billing_role_assignment_id" ] || return 0
+  [ -z "$billing_role_assignment_id" ] || {
+    write_step_detail "exists, skipping"
+    return 0
+  }
 
   billing_role_assignment_id="$(invoke_az_mutation --dry-run-result "$assignment_resource_id" \
     rest --method POST --url "${billing_account_resource_id}/createBillingRoleAssignment?api-version=${BILLING_API_VERSION}" \
@@ -388,17 +398,25 @@ set_billing_account_reader() {
 
 # Registers the resource providers that the storage account and cost export need.
 register_resource_providers() {
-  local namespace
-  for namespace in $(get_unregistered_resource_providers); do
+  local namespace unregistered_resource_providers
+  unregistered_resource_providers="$(get_unregistered_resource_providers)"
+  for namespace in $REQUIRED_RESOURCE_PROVIDERS; do
     write_step "Resource provider ${namespace}"
-    invoke_az_mutation provider register --namespace "$namespace" --subscription "$active_subscription_id" --wait >/dev/null
+    if grep -qx "$namespace" <<<"$unregistered_resource_providers"; then
+      invoke_az_mutation provider register --namespace "$namespace" --subscription "$active_subscription_id" --wait >/dev/null
+    else
+      write_step_detail "registered, skipping"
+    fi
   done
 }
 
 # Creates the resource group of the storage account, if it does not exist.
 set_resource_group() {
   write_step "Resource group ${resource_group}"
-  test_resource_group_exists && return 0
+  test_resource_group_exists && {
+    write_step_detail "exists, skipping"
+    return 0
+  }
   invoke_az_mutation group create --name "$resource_group" --location "$location" \
     --tags "${VERSION_TAG_NAME}=${SCRIPT_VERSION}" >/dev/null
 }
@@ -407,7 +425,10 @@ set_resource_group() {
 set_storage_account() {
   write_step "Storage account ${storage_account}"
   az storage account show --name "$storage_account" --resource-group "$resource_group" \
-    --query id -o tsv >/dev/null 2>&1 && return 0
+    --query id -o tsv >/dev/null 2>&1 && {
+    write_step_detail "exists, skipping"
+    return 0
+  }
   invoke_az_mutation storage account create --name "$storage_account" \
     --resource-group "$resource_group" --location "$location" \
     --sku "$STORAGE_ACCOUNT_SKU" --kind StorageV2 --min-tls-version TLS1_2 --https-only true \
@@ -423,7 +444,10 @@ set_storage_container() {
   write_step "Storage container ${export_container}"
   container_exists="$(az storage container-rm exists --storage-account "$export_storage_account_id" \
     --name "$export_container" --query exists -o tsv 2>/dev/null || true)"
-  [ "$container_exists" != true ] || return 0
+  [ "$container_exists" != true ] || {
+    write_step_detail "exists, skipping"
+    return 0
+  }
   invoke_az_mutation storage container-rm create --storage-account "$export_storage_account_id" \
     --name "$export_container" --public-access off >/dev/null
 }

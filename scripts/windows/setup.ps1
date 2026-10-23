@@ -207,6 +207,8 @@ function Set-ServicePrincipal {
     $servicePrincipal = Invoke-AzMutation -Arguments @('ad', 'sp', 'create', '--id', $ClientId) `
       -DryRunResult @{ id = '<service-principal-object-id>' }
     $script:ServicePrincipalObjectId = $servicePrincipal.id
+  } else {
+    Write-StepDetail "exists, skipping creation"
   }
 
   $servicePrincipalUrl = "$GraphUrl/servicePrincipals/$ServicePrincipalObjectId"
@@ -218,7 +220,10 @@ function Set-ServicePrincipal {
   $existingOwners = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', "$servicePrincipalUrl/owners?`$select=id") -AllowFailure
   $existingOwnerIds = @($existingOwners.value | ForEach-Object { $_.id })
   foreach ($owner in $Owners) {
-    if ($existingOwnerIds -contains $owner) { continue }
+    if ($existingOwnerIds -contains $owner) {
+      Write-StepDetail "owner $owner exists, skipping"
+      continue
+    }
     Invoke-AzMutation -Arguments @('rest', '--method', 'POST', '--url', "$servicePrincipalUrl/owners/`$ref", '--headers', 'Content-Type=application/json') -Body @{
       '@odata.id' = "$GraphUrl/directoryObjects/$owner"
     } | Out-Null
@@ -234,7 +239,10 @@ function Set-RoleAssignment {
       '--scope', $Scope,
       '--role', $Role
     ))
-  if ($existing.Count -gt 0 -and $existing[0]) { return $existing[0].id }
+  if ($existing.Count -gt 0 -and $existing[0]) {
+    Write-StepDetail "exists, skipping"
+    return $existing[0].id
+  }
 
   $assignment = Invoke-AzMutation -DryRunResult @{ id = '<role-assignment-id>' } -Arguments @(
     'role', 'assignment', 'create',
@@ -295,6 +303,7 @@ function Set-BillingAccountReader {
   $assignmentResourceId = "$BillingAccountResourceId/billingRoleAssignments/${RoleDefinitionId}_$ServicePrincipalObjectId"
   $existing = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', "${assignmentResourceId}?api-version=$BillingApiVersion") -AllowFailure
   if ($existing) {
+    Write-StepDetail "exists, skipping"
     $script:BillingRoleAssignmentId = $existing.id
     return
   }
@@ -307,8 +316,12 @@ function Set-BillingAccountReader {
 # Registers the resource providers that the storage account and cost export need.
 function Register-ResourceProviders {
   $unregisteredResourceProviders = @(Get-UnregisteredResourceProviders)
-  foreach ($namespace in $unregisteredResourceProviders) {
+  foreach ($namespace in $RequiredResourceProviders) {
     Write-Step "Resource provider $namespace"
+    if ($unregisteredResourceProviders -notcontains $namespace) {
+      Write-StepDetail "registered, skipping"
+      continue
+    }
     Invoke-AzMutation -Arguments @(
       'provider', 'register',
       '--namespace', $namespace,
@@ -321,7 +334,10 @@ function Register-ResourceProviders {
 # Creates the resource group of the storage account, if it does not exist.
 function Set-ResourceGroup {
   Write-Step "Resource group $ResourceGroup"
-  if (Test-ResourceGroupExists) { return }
+  if (Test-ResourceGroupExists) {
+    Write-StepDetail "exists, skipping"
+    return
+  }
   Invoke-AzMutation -Arguments @(
     'group', 'create',
     '--name', $ResourceGroup,
@@ -334,7 +350,10 @@ function Set-ResourceGroup {
 function Set-StorageAccount {
   Write-Step "Storage account $StorageAccount"
   $existing = Invoke-Az -Arguments @('storage', 'account', 'show', '--name', $StorageAccount, '--resource-group', $ResourceGroup) -AllowFailure
-  if ($existing) { return }
+  if ($existing) {
+    Write-StepDetail "exists, skipping"
+    return
+  }
   Invoke-AzMutation -Arguments @(
     'storage', 'account', 'create',
     '--name', $StorageAccount,
@@ -364,7 +383,10 @@ function Set-StorageContainer {
     '--storage-account', $ExportStorageAccountId,
     '--name', $ExportContainer
   )
-  if ($exists -and $exists.exists -eq $true) { return }
+  if ($exists -and $exists.exists -eq $true) {
+    Write-StepDetail "exists, skipping"
+    return
+  }
   Invoke-AzMutation -Arguments @(
     'storage', 'container-rm', 'create',
     '--storage-account', $ExportStorageAccountId,

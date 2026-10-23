@@ -80,6 +80,12 @@ function Write-Step {
   [Console]::Error.WriteLine("==> $Message")
 }
 
+# Writes a detail line under the current step to stderr.
+function Write-StepDetail {
+  param([string]$Message)
+  [Console]::Error.WriteLine("  - $Message")
+}
+
 # Writes an error to stderr and stops the script.
 function Stop-WithError {
   param([string]$Message)

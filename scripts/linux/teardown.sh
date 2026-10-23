@@ -221,14 +221,17 @@ invoke_preflight() {
 
 # Removes the role assignments of a principal on a scope.
 remove_role_assignments() {
-  local scope="$1" role="$2" principal_id="$3" assignment_id assignment_scope
-  [ -n "$principal_id" ] || return 0
-  while IFS=$'\t' read -r assignment_id assignment_scope; do
-    [ -n "$assignment_id" ] || continue
-    [ "$(lowercase "$assignment_scope")" = "$(lowercase "$scope")" ] || continue
-    invoke_az_mutation role assignment delete --ids "$assignment_id"
-  done < <(az role assignment list --assignee "$principal_id" --scope "$scope" --role "$role" \
-    --query "[].[id, scope]" -o tsv 2>/dev/null || true)
+  local scope="$1" role="$2" principal_id="$3" assignment_id assignment_scope removed_count=0
+  if [ -n "$principal_id" ]; then
+    while IFS=$'\t' read -r assignment_id assignment_scope; do
+      [ -n "$assignment_id" ] || continue
+      [ "$(lowercase "$assignment_scope")" = "$(lowercase "$scope")" ] || continue
+      invoke_az_mutation role assignment delete --ids "$assignment_id"
+      removed_count=$((removed_count + 1))
+    done < <(az role assignment list --assignee "$principal_id" --scope "$scope" --role "$role" \
+      --query "[].[id, scope]" -o tsv 2>/dev/null || true)
+  fi
+  [ "$removed_count" -gt 0 ] || write_step_detail "not found, skipping"
 }
 
 # Removes the resource group, only if the setup script created it and it contains no other resources.
@@ -238,14 +241,14 @@ remove_resource_group() {
   version_tag="$(az group show --name "$resource_group" \
     --query "tags.${VERSION_TAG_NAME}" -o tsv 2>/dev/null || true)"
   [ -n "$version_tag" ] || {
-    write_step "Resource group not found or not created by setup.sh, skipping"
+    write_step_detail "not found or not created by setup.sh, skipping"
     return 0
   }
 
   remaining_resource_count="$(az resource list --resource-group "$resource_group" \
     --query "[?id!='${export_storage_account_id}'] | length(@)" -o tsv)"
   [ "$remaining_resource_count" = 0 ] || {
-    write_step "Resource group has ${remaining_resource_count} other resources, skipping"
+    write_step_detail "has ${remaining_resource_count} other resources, skipping"
     return 0
   }
 
@@ -271,25 +274,30 @@ remove_billing_exports() {
   remove_role_assignments "$export_storage_account_id" "Storage Blob Data Contributor" "$export_principal_id"
 
   write_step "FOCUS cost export ${EXPORT_NAME}"
-  [ -z "$export_id" ] || invoke_az_mutation rest --method DELETE --url "$export_url"
-
-  [ "$keep_storage" = false ] || {
-    write_step "Keeping storage account ${storage_account}"
-    return 0
-  }
+  if [ -n "$export_id" ]; then
+    invoke_az_mutation rest --method DELETE --url "$export_url"
+  else
+    write_step_detail "not found, skipping"
+  fi
 
   write_step "Storage account ${storage_account}"
-  if test_resource_exists "$export_storage_account_id"; then
-    [ -n "$(get_storage_account_version_tag)" ] || {
-      write_step "Storage account not created by setup.sh, skipping"
-      return 0
-    }
+  [ "$keep_storage" = false ] || {
+    write_step_detail "kept because of --keep-storage, skipping"
+    return 0
+  }
+  if ! test_resource_exists "$export_storage_account_id"; then
+    write_step_detail "not found, skipping"
+  elif [ -z "$(get_storage_account_version_tag)" ]; then
+    write_step_detail "not created by setup.sh, skipping"
+    return 0
+  else
     invoke_az_mutation storage account delete --ids "$export_storage_account_id" --yes
   fi
 
   remove_resource_group
 
-  write_step "Resource providers stay registered"
+  write_step "Resource providers"
+  write_step_detail "stay registered, skipping"
 }
 
 # Removes the billing reader role of Infracost on the billing account.
@@ -297,7 +305,11 @@ remove_billing_access() {
   local billing_account_resource_id="/providers/Microsoft.Billing/billingAccounts/${billing_account_id}"
   local role_definition_id assignment_name assignment_url
   [ "$skip_billing_access" = false ] || return 0
-  [ -n "$service_principal_object_id" ] || return 0
+  write_step "Billing reader role on billing account ${billing_account_id}"
+  [ -n "$service_principal_object_id" ] || {
+    write_step_detail "service principal not found, skipping"
+    return 0
+  }
 
   role_definition_id="$(get_billing_role_definition_id)"
   if [ "$billing_agreement_type" = EA ]; then
@@ -307,8 +319,10 @@ remove_billing_access() {
   fi
   assignment_url="${billing_account_resource_id}/billingRoleAssignments/${assignment_name}?api-version=${BILLING_API_VERSION}"
 
-  write_step "Billing reader role on billing account ${billing_account_id}"
-  az rest --method GET --url "$assignment_url" --query id -o tsv >/dev/null 2>&1 || return 0
+  az rest --method GET --url "$assignment_url" --query id -o tsv >/dev/null 2>&1 || {
+    write_step_detail "not found, skipping"
+    return 0
+  }
   invoke_az_mutation rest --method DELETE --url "$assignment_url"
 }
 
@@ -327,8 +341,11 @@ remove_management_group_roles() {
 
 # Removes the Infracost service principal from the tenant.
 remove_service_principal() {
-  [ -n "$service_principal_object_id" ] || return 0
   write_step "Service principal for application ${client_id}"
+  [ -n "$service_principal_object_id" ] || {
+    write_step_detail "not found, skipping"
+    return 0
+  }
   invoke_az_mutation ad sp delete --id "$service_principal_object_id"
 }
 

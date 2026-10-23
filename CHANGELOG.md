@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/infracost/terraform-azure-integration/compare/v0.5.0...v0.6.0) (2026-10-23)
+
+
+### Features
+
+* add az CLI setup and teardown scripts for Linux and Windows ([#18](https://github.com/infracost/terraform-azure-integration/issues/18)) ([beb811d](https://github.com/infracost/terraform-azure-integration/commit/beb811de8a4372cf9f7cf3feb7eff1947b25dbbd))
+
+
+### Bug Fixes
+
+* billing reader role ID in the PowerShell scripts ([#21](https://github.com/infracost/terraform-azure-integration/issues/21)) ([04af3ce](https://github.com/infracost/terraform-azure-integration/commit/04af3ce71b6c068cf68bca546151cab93ad08476))
+* preflight and log output of the az CLI scripts ([#20](https://github.com/infracost/terraform-azure-integration/issues/20)) ([fb0d91f](https://github.com/infracost/terraform-azure-integration/commit/fb0d91fdbf11b72c7e7e5f25e086ca96a024d449))
+
 ## [0.5.0](https://github.com/infracost/terraform-azure-integration/compare/v0.4.1...v0.5.0) (2026-10-02)
 
 

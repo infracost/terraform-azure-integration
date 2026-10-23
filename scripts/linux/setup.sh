@@ -197,8 +197,9 @@ confirm_billing_account() {
 
 # Checks the permissions to register the resource providers and create the billing exports storage.
 invoke_preflight_billing_exports_storage() {
-  local namespace resource_group_scope name_available
-  for namespace in $(get_unregistered_resource_providers); do
+  local namespace resource_group_scope name_available unregistered_resource_providers
+  unregistered_resource_providers="$(get_unregistered_resource_providers)"
+  for namespace in $unregistered_resource_providers; do
     assert_arm_actions "/subscriptions/${active_subscription_id}" "Resource provider registration" "${namespace}/register/action"
   done
 
@@ -215,6 +216,10 @@ invoke_preflight_billing_exports_storage() {
     Microsoft.Authorization/roleAssignments/write
 
   test_resource_exists "$export_storage_account_id" && return 0
+  if printf '%s\n' "$unregistered_resource_providers" | grep -qx Microsoft.Storage; then
+    add_unchecked_permission "Storage account name: cannot check if ${storage_account} is available until the run registers Microsoft.Storage"
+    return 0
+  fi
   name_available="$(az storage account check-name --name "$storage_account" --query nameAvailable -o tsv 2>/dev/null || true)"
   case "$name_available" in
     true) add_preflight_pass "Storage account name ${storage_account} is available" ;;

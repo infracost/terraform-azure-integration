@@ -135,7 +135,8 @@ function Assert-StorageAccountOwner {
 
 # Checks the permissions to register the resource providers and create the billing exports storage.
 function Invoke-PreflightBillingExportsStorage {
-  foreach ($namespace in @(Get-UnregisteredResourceProviders)) {
+  $unregisteredResourceProviders = @(Get-UnregisteredResourceProviders)
+  foreach ($namespace in $unregisteredResourceProviders) {
     Assert-ArmActions "/subscriptions/$ActiveSubscriptionId" "Resource provider registration" @("$namespace/register/action")
   }
 
@@ -153,6 +154,10 @@ function Invoke-PreflightBillingExportsStorage {
   )
 
   if (Test-ResourceExists $ExportStorageAccountId) { return }
+  if ($unregisteredResourceProviders -contains 'Microsoft.Storage') {
+    Add-UncheckedPermission "Storage account name: cannot check if $StorageAccount is available until the run registers Microsoft.Storage"
+    return
+  }
   $nameCheck = Invoke-Az -Arguments @('storage', 'account', 'check-name', '--name', $StorageAccount) -AllowFailure
   if (-not $nameCheck) {
     Add-UncheckedPermission "Storage account name: cannot check if $StorageAccount is available"

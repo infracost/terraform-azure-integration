@@ -457,7 +457,7 @@ function Get-BillingAgreementType {
 }
 
 # Gets the billing role definition IDs of a principal on the billing account, from all the pages.
-function Get-BillingRoleDefinitionId {
+function Get-BillingRoleDefinitionIds {
   param([string]$PrincipalObjectId)
   $pageUrl = "/providers/Microsoft.Billing/billingAccounts/$BillingAccountId/billingRoleAssignments?api-version=$BillingApiVersion"
   $roleDefinitionIds = [System.Collections.Generic.List[string]]::new()
@@ -494,7 +494,7 @@ function Assert-BillingAccountRole {
   $callerObjectId = Get-SignedInObjectId
   $callerRoleDefinitionIds = $null
   if ($callerObjectId) {
-    $callerRoleDefinitionIds = Get-BillingRoleDefinitionId -PrincipalObjectId $callerObjectId
+    $callerRoleDefinitionIds = Get-BillingRoleDefinitionIds -PrincipalObjectId $callerObjectId
   }
   if ($null -eq $callerRoleDefinitionIds) {
     Add-UncheckedPermission "${Description}: cannot read the billing role assignments on billing account $BillingAccountId"

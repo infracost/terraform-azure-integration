@@ -157,17 +157,17 @@ The scripts remove the spaces around each item of a comma-separated list, and ig
 
 ## Preflight
 
-Before the first change, each script checks that the signed-in principal can do all the steps. The preflight also runs with `--dry-run`. If an item fails, the script lists all failed items and stops before it changes anything.
+Before the first change, each script checks that the signed-in principal can do all the steps. The preflight also runs with `--dry-run`. The script lists each check that passed, each check that it could not do, and each check that failed. If an item fails, the script stops before it changes anything.
 
 | Step | Check |
 | --- | --- |
 | Service principal | Graph directory role: Global Administrator, Application Administrator or Cloud Application Administrator. For a service principal that runs the script: `Application.ReadWrite.All`, or `Application.ReadWrite.OwnedBy` to create. Owner of the Infracost service principal is also accepted when it exists. |
 | Management group roles | `Microsoft.Authorization/roleAssignments/read` and `/write` (`/delete` for teardown) on each management group |
-| Billing reader role | Billing `checkAccess` on the billing account |
+| Billing reader role | Billing account owner (MCA) or Enterprise Administrator (EA) role on the billing account, for the signed-in principal |
 | Resource providers | `<namespace>/register/action` on the subscription, only for providers that are not registered |
 | Billing exports storage | Write actions for the resource group, storage account, container, lifecycle policy and role assignments. Delete actions for teardown. |
 | Storage account name | Name is free, if the storage account does not exist yet |
-| FOCUS cost export | Billing `checkAccess` on the billing account |
+| FOCUS cost export | Billing account owner (MCA) or Enterprise Administrator (EA) role on the billing account, for the signed-in principal. With `--skip-billing-access`, the agreement type comes from the billing account |
 | Existing export | Storage account exists, and `roleAssignments/write` on it |
 
 The preflight cannot find these problems, so the run can still fail on them:
@@ -176,6 +176,7 @@ The preflight cannot find these problems, so the run can still fail on them:
 - Deny assignments.
 - Custom directory roles that allow you to create a service principal. The preflight reports them as missing. Use `--skip-preflight`.
 - Roles that you received a few minutes before the run, because Azure takes time to apply them.
+- Billing roles that you get through a group, or a billing account that limits what its owner can do. The preflight checks only the role assignment of the signed-in principal.
 
 If the preflight cannot read a permission, it shows a warning and does not stop. A role that is eligible in Privileged Identity Management, but not active, is reported as missing. Activate it and run the script again.
 

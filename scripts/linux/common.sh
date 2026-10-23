@@ -15,6 +15,10 @@ EA_ROLE_DEFINITION_ID="24f8edb6-1668-4659-b5e2-40bb5f3a7d7e"
 MCA_AGREEMENT_TYPE="MicrosoftCustomerAgreement"
 MCA_ROLE_DEFINITION_ID="50000000-aaaa-bbbb-cccc-100000000002"
 
+# Billing account roles that allow you to assign billing roles and manage cost exports.
+EA_ADMINISTRATOR_ROLE_DEFINITION_ID="9f1983cb-2574-400c-87e9-34cf8e2280db"
+MCA_OWNER_ROLE_DEFINITION_ID="50000000-aaaa-bbbb-cccc-100000000000"
+
 # Directory roles and Microsoft Graph application permissions that allow you to manage the Infracost service principal.
 GLOBAL_ADMINISTRATOR_ROLE_TEMPLATE_ID="62e90394-69f5-4237-9190-012177145e10"
 APPLICATION_ADMINISTRATOR_ROLE_TEMPLATE_ID="9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3"
@@ -63,12 +67,21 @@ existing_root_path=""
 export_storage_account_id=""
 export_container=""
 export_root_path=""
+preflight_passes=""
+step_written=false
 preflight_failures=""
 preflight_unchecked=""
 
 # Writes a progress line to stderr.
 write_step() {
+  [ "$step_written" = false ] || printf '\n' >&2
+  step_written=true
   printf '==> %s\n' "$*" >&2
+}
+
+# Writes a detail line under the current step to stderr.
+write_step_detail() {
+  printf '  - %s\n' "$*" >&2
 }
 
 # Writes an error to stderr and stops the script.
@@ -304,6 +317,11 @@ get_storage_account_version_tag() {
     --query "tags.${VERSION_TAG_NAME}" -o tsv 2>/dev/null || true
 }
 
+# Records a permission that the preflight confirmed.
+add_preflight_pass() {
+  preflight_passes="${preflight_passes}  - $*"$'\n'
+}
+
 # Records a permission that is missing.
 add_preflight_failure() {
   preflight_failures="${preflight_failures}  - $*"$'\n'
@@ -359,33 +377,76 @@ assert_arm_actions() {
     return 0
   fi
   for action in "$@"; do
-    test_arm_action_allowed "$action" "$permission_entries" \
-      || add_preflight_failure "${description}: ${action} on ${scope}"
+    if test_arm_action_allowed "$action" "$permission_entries"; then
+      add_preflight_pass "${description}: ${action} on ${scope}"
+    else
+      add_preflight_failure "${description}: ${action} on ${scope}"
+    fi
   done
 }
 
-# Checks that the signed-in principal can do each billing action on the billing account.
-assert_billing_actions() {
-  local description="$1" action actions_json="" access_decisions access_decision
-  shift
-  for action in "$@"; do
-    actions_json="${actions_json:+${actions_json}, }$(json_string "$action")"
-  done
-  if ! access_decisions="$(az rest --method POST \
-    --url "/providers/Microsoft.Billing/billingAccounts/${billing_account_id}/checkAccess?api-version=${BILLING_API_VERSION}" \
-    --body "{ \"actions\": [${actions_json}] }" \
-    --query "[].join('|', [action, accessDecision])" -o tsv 2>/dev/null)"; then
-    add_unchecked_permission "${description}: cannot check access on billing account ${billing_account_id}"
+# Gets the object ID of the signed-in principal.
+get_signed_in_object_id() {
+  local caller_path="${GRAPH_URL}/me"
+  [ "$signed_in_principal_type" != servicePrincipal ] \
+    || caller_path="${GRAPH_URL}/servicePrincipals(appId='${signed_in_principal_name}')"
+  az rest --method GET --url "${caller_path}?\$select=id" --query id -o tsv 2>/dev/null || true
+}
+
+# Gets the billing agreement type from the arguments, or from the billing account if the arguments do not give it.
+get_billing_agreement_type() {
+  if [ -n "$billing_agreement_type" ]; then
+    printf '%s' "$billing_agreement_type"
     return 0
   fi
-  for action in "$@"; do
-    access_decision="$(awk -F'|' -v action="$action" 'tolower($1) == tolower(action) { print $2 }' <<<"$access_decisions")"
-    case "$access_decision" in
-      Allowed) ;;
-      NotAllowed) add_preflight_failure "${description}: ${action} on billing account ${billing_account_id}" ;;
-      *) add_unchecked_permission "${description}: no access decision for ${action} on billing account ${billing_account_id}" ;;
-    esac
+  case "$(az rest --method GET \
+    --url "/providers/Microsoft.Billing/billingAccounts/${billing_account_id}?api-version=${BILLING_API_VERSION}" \
+    --query properties.agreementType -o tsv 2>/dev/null)" in
+    "$EA_AGREEMENT_TYPE") printf EA ;;
+    "$MCA_AGREEMENT_TYPE") printf MCA ;;
+  esac
+}
+
+# Gets the billing role definition IDs of a principal on the billing account, from all the pages.
+get_billing_role_definition_ids() {
+  local principal_object_id="$1" page_url page page_role_definition_ids
+  page_url="/providers/Microsoft.Billing/billingAccounts/${billing_account_id}/billingRoleAssignments?api-version=${BILLING_API_VERSION}"
+  while [ -n "$page_url" ]; do
+    page="$(az rest --method GET --url "$page_url" \
+      --query "join('|', [nextLink || '', join(',', (value || \`[]\`)[?properties.principalId=='${principal_object_id}'].properties.roleDefinitionId)])" \
+      -o tsv 2>/dev/null)" || return 1
+    IFS='|' read -r page_url page_role_definition_ids <<<"$page"
+    [ -z "$page_role_definition_ids" ] || tr ',' '\n' <<<"$page_role_definition_ids"
   done
+}
+
+# Checks that the signed-in principal has the billing account role that the billing steps need.
+assert_billing_account_role() {
+  local description="$1" required_role_definition_id required_role_name caller_object_id role_definition_ids
+  case "$(get_billing_agreement_type)" in
+    EA)
+      required_role_definition_id="$EA_ADMINISTRATOR_ROLE_DEFINITION_ID"
+      required_role_name="Enterprise Administrator"
+      ;;
+    MCA)
+      required_role_definition_id="$MCA_OWNER_ROLE_DEFINITION_ID"
+      required_role_name="Billing account owner"
+      ;;
+    *)
+      add_unchecked_permission "${description}: cannot read the agreement type of billing account ${billing_account_id}"
+      return 0
+      ;;
+  esac
+  caller_object_id="$(get_signed_in_object_id)"
+  if [ -z "$caller_object_id" ] || ! role_definition_ids="$(get_billing_role_definition_ids "$caller_object_id")"; then
+    add_unchecked_permission "${description}: cannot read the billing role assignments on billing account ${billing_account_id}"
+    return 0
+  fi
+  if grep -qi "/${required_role_definition_id}\$" <<<"$role_definition_ids"; then
+    add_preflight_pass "${description}: ${required_role_name} on billing account ${billing_account_id}"
+  else
+    add_preflight_failure "${description}: needs ${required_role_name} on billing account ${billing_account_id}"
+  fi
 }
 
 # Checks that the signed-in principal can create or change the Infracost service principal.
@@ -395,8 +456,14 @@ assert_service_principal_management() {
     caller_path="${GRAPH_URL}/servicePrincipals(appId='${signed_in_principal_name}')"
     if granted_app_roles="$(az rest --method GET --url "${caller_path}/appRoleAssignments?\$select=appRoleId" \
       --query "value[].appRoleId" -o tsv 2>/dev/null)"; then
-      test_lines_contain_any "$granted_app_roles" "$GRAPH_APPLICATION_READ_WRITE_ALL_ROLE_ID" && return 0
-      [ -z "$target_object_id" ] && test_lines_contain_any "$granted_app_roles" "$GRAPH_APPLICATION_READ_WRITE_OWNED_BY_ROLE_ID" && return 0
+      if test_lines_contain_any "$granted_app_roles" "$GRAPH_APPLICATION_READ_WRITE_ALL_ROLE_ID"; then
+        add_preflight_pass "${description}: Application.ReadWrite.All"
+        return 0
+      fi
+      if [ -z "$target_object_id" ] && test_lines_contain_any "$granted_app_roles" "$GRAPH_APPLICATION_READ_WRITE_OWNED_BY_ROLE_ID"; then
+        add_preflight_pass "${description}: Application.ReadWrite.OwnedBy"
+        return 0
+      fi
     fi
   else
     caller_path="${GRAPH_URL}/me"
@@ -408,13 +475,19 @@ assert_service_principal_management() {
     add_unchecked_permission "${description}: cannot read the directory roles of the signed-in principal"
     return 0
   fi
-  test_lines_contain_any "$directory_roles" "$APPLICATION_MANAGER_ROLE_TEMPLATE_IDS" && return 0
+  if test_lines_contain_any "$directory_roles" "$APPLICATION_MANAGER_ROLE_TEMPLATE_IDS"; then
+    add_preflight_pass "${description}: Application Administrator, Cloud Application Administrator or Global Administrator directory role"
+    return 0
+  fi
 
   if [ -n "$target_object_id" ]; then
-    caller_object_id="$(az rest --method GET --url "${caller_path}?\$select=id" --query id -o tsv 2>/dev/null || true)"
+    caller_object_id="$(get_signed_in_object_id)"
     owner_ids="$(az rest --method GET --url "${GRAPH_URL}/servicePrincipals/${target_object_id}/owners?\$select=id" \
       --query "value[].id" -o tsv 2>/dev/null || true)"
-    [ -n "$caller_object_id" ] && test_lines_contain_any "$owner_ids" "$caller_object_id" && return 0
+    if [ -n "$caller_object_id" ] && test_lines_contain_any "$owner_ids" "$caller_object_id"; then
+      add_preflight_pass "${description}: owner of the service principal"
+      return 0
+    fi
   fi
 
   add_preflight_failure "${description}: Application Administrator, Cloud Application Administrator or Global Administrator directory role, Application.ReadWrite.All, or ownership of the service principal"
@@ -431,6 +504,10 @@ assert_management_group_role_permissions() {
 
 # Writes the preflight result. Stops if a permission is missing.
 write_preflight_report() {
+  if [ -n "$preflight_passes" ]; then
+    write_step "Preflight checks that passed:"
+    printf '%s' "$preflight_passes" >&2
+  fi
   if [ -n "$preflight_unchecked" ]; then
     write_step "Preflight could not check these items. The run can still fail on them:"
     printf '%s' "$preflight_unchecked" >&2

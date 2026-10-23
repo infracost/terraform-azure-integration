@@ -135,7 +135,8 @@ function Assert-StorageAccountOwner {
 
 # Checks the permissions to register the resource providers and create the billing exports storage.
 function Invoke-PreflightBillingExportsStorage {
-  foreach ($namespace in @(Get-UnregisteredResourceProviders)) {
+  $unregisteredResourceProviders = @(Get-UnregisteredResourceProviders)
+  foreach ($namespace in $unregisteredResourceProviders) {
     Assert-ArmActions "/subscriptions/$ActiveSubscriptionId" "Resource provider registration" @("$namespace/register/action")
   }
 
@@ -153,15 +154,24 @@ function Invoke-PreflightBillingExportsStorage {
   )
 
   if (Test-ResourceExists $ExportStorageAccountId) { return }
+  if ($unregisteredResourceProviders -contains 'Microsoft.Storage') {
+    Add-UncheckedPermission "Storage account name: cannot check if $StorageAccount is available until the run registers Microsoft.Storage"
+    return
+  }
   $nameCheck = Invoke-Az -Arguments @('storage', 'account', 'check-name', '--name', $StorageAccount) -AllowFailure
-  if ($nameCheck -and $nameCheck.nameAvailable -eq $false) {
+  if (-not $nameCheck) {
+    Add-UncheckedPermission "Storage account name: cannot check if $StorageAccount is available"
+  } elseif ($nameCheck.nameAvailable -eq $false) {
     Add-PreflightFailure "Storage account name $StorageAccount is in use. Pass -StorageAccount with a different name"
+  } else {
+    Add-PreflightPass "Storage account name $StorageAccount is available"
   }
 }
 
 # Checks that the existing export storage account exists and that you can assign roles on it.
 function Invoke-PreflightExistingExport {
   if (Test-ResourceExists $ExistingStorageAccountId) {
+    Add-PreflightPass "Existing export: storage account $ExistingStorageAccountId exists"
     Assert-ArmActions $ExistingStorageAccountId "Blob reader role on the existing export" @('Microsoft.Authorization/roleAssignments/write')
   } else {
     Add-PreflightFailure "Existing export: storage account $ExistingStorageAccountId not found"
@@ -176,14 +186,14 @@ function Invoke-Preflight {
   Assert-ServicePrincipalManagement "Service principal" $ServicePrincipalObjectId
   Assert-ManagementGroupRolePermissions @('Microsoft.Authorization/roleAssignments/read', 'Microsoft.Authorization/roleAssignments/write')
   if (-not $SkipBillingAccess) {
-    Assert-BillingActions "Billing reader role" @('Microsoft.Billing/billingAccounts/billingRoleAssignments/write')
+    Assert-BillingAccountRole "Billing reader role"
   }
 
   if (-not $SkipBillingExports -and $ExistingExport) {
     Invoke-PreflightExistingExport
   } elseif (-not $SkipBillingExports) {
     Invoke-PreflightBillingExportsStorage
-    Assert-BillingActions "FOCUS cost export" @('Microsoft.CostManagement/exports/read', 'Microsoft.CostManagement/exports/write')
+    Assert-BillingAccountRole "FOCUS cost export"
   }
 
   Write-PreflightReport
@@ -197,6 +207,8 @@ function Set-ServicePrincipal {
     $servicePrincipal = Invoke-AzMutation -Arguments @('ad', 'sp', 'create', '--id', $ClientId) `
       -DryRunResult @{ id = '<service-principal-object-id>' }
     $script:ServicePrincipalObjectId = $servicePrincipal.id
+  } else {
+    Write-StepDetail "exists, skipping creation"
   }
 
   $servicePrincipalUrl = "$GraphUrl/servicePrincipals/$ServicePrincipalObjectId"
@@ -208,7 +220,10 @@ function Set-ServicePrincipal {
   $existingOwners = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', "$servicePrincipalUrl/owners?`$select=id") -AllowFailure
   $existingOwnerIds = @($existingOwners.value | ForEach-Object { $_.id })
   foreach ($owner in $Owners) {
-    if ($existingOwnerIds -contains $owner) { continue }
+    if ($existingOwnerIds -contains $owner) {
+      Write-StepDetail "owner $owner exists, skipping"
+      continue
+    }
     Invoke-AzMutation -Arguments @('rest', '--method', 'POST', '--url', "$servicePrincipalUrl/owners/`$ref", '--headers', 'Content-Type=application/json') -Body @{
       '@odata.id' = "$GraphUrl/directoryObjects/$owner"
     } | Out-Null
@@ -224,7 +239,10 @@ function Set-RoleAssignment {
       '--scope', $Scope,
       '--role', $Role
     ))
-  if ($existing.Count -gt 0 -and $existing[0]) { return $existing[0].id }
+  if ($existing.Count -gt 0 -and $existing[0]) {
+    Write-StepDetail "exists, skipping"
+    return $existing[0].id
+  }
 
   $assignment = Invoke-AzMutation -DryRunResult @{ id = '<role-assignment-id>' } -Arguments @(
     'role', 'assignment', 'create',
@@ -285,6 +303,7 @@ function Set-BillingAccountReader {
   $assignmentResourceId = "$BillingAccountResourceId/billingRoleAssignments/${RoleDefinitionId}_$ServicePrincipalObjectId"
   $existing = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', "${assignmentResourceId}?api-version=$BillingApiVersion") -AllowFailure
   if ($existing) {
+    Write-StepDetail "exists, skipping"
     $script:BillingRoleAssignmentId = $existing.id
     return
   }
@@ -296,8 +315,13 @@ function Set-BillingAccountReader {
 
 # Registers the resource providers that the storage account and cost export need.
 function Register-ResourceProviders {
-  foreach ($namespace in @(Get-UnregisteredResourceProviders)) {
+  $unregisteredResourceProviders = @(Get-UnregisteredResourceProviders)
+  foreach ($namespace in $RequiredResourceProviders) {
     Write-Step "Resource provider $namespace"
+    if ($unregisteredResourceProviders -notcontains $namespace) {
+      Write-StepDetail "registered, skipping"
+      continue
+    }
     Invoke-AzMutation -Arguments @(
       'provider', 'register',
       '--namespace', $namespace,
@@ -310,7 +334,10 @@ function Register-ResourceProviders {
 # Creates the resource group of the storage account, if it does not exist.
 function Set-ResourceGroup {
   Write-Step "Resource group $ResourceGroup"
-  if (Test-ResourceGroupExists) { return }
+  if (Test-ResourceGroupExists) {
+    Write-StepDetail "exists, skipping"
+    return
+  }
   Invoke-AzMutation -Arguments @(
     'group', 'create',
     '--name', $ResourceGroup,
@@ -323,7 +350,10 @@ function Set-ResourceGroup {
 function Set-StorageAccount {
   Write-Step "Storage account $StorageAccount"
   $existing = Invoke-Az -Arguments @('storage', 'account', 'show', '--name', $StorageAccount, '--resource-group', $ResourceGroup) -AllowFailure
-  if ($existing) { return }
+  if ($existing) {
+    Write-StepDetail "exists, skipping"
+    return
+  }
   Invoke-AzMutation -Arguments @(
     'storage', 'account', 'create',
     '--name', $StorageAccount,
@@ -335,8 +365,13 @@ function Set-StorageAccount {
     '--https-only', 'true',
     '--allow-blob-public-access', 'false',
     '--allow-shared-key-access', 'false',
-    '--default-to-oauth-authentication', 'true',
     '--tags', "$VersionTagName=$ScriptVersion"
+  ) | Out-Null
+  Invoke-AzMutation -Arguments @(
+    'storage', 'account', 'update',
+    '--name', $StorageAccount,
+    '--resource-group', $ResourceGroup,
+    '--set', 'defaultToOAuthAuthentication=true'
   ) | Out-Null
 }
 
@@ -348,7 +383,10 @@ function Set-StorageContainer {
     '--storage-account', $ExportStorageAccountId,
     '--name', $ExportContainer
   )
-  if ($exists -and $exists.exists -eq $true) { return }
+  if ($exists -and $exists.exists -eq $true) {
+    Write-StepDetail "exists, skipping"
+    return
+  }
   Invoke-AzMutation -Arguments @(
     'storage', 'container-rm', 'create',
     '--storage-account', $ExportStorageAccountId,

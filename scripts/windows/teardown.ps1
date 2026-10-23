@@ -110,6 +110,7 @@ function Assert-Arguments {
 function Confirm-Teardown {
   if ($DryRun -or $Yes) { return }
   if ([Console]::IsInputRedirected) { Stop-WithError "pass -Yes to run without a terminal." }
+  [Console]::Error.WriteLine()
   $prompt = if (-not $SkipBillingExports -and -not $ExistingExport -and -not $KeepStorage) {
     "This removes the Infracost integration from tenant $ActiveTenantId and deletes storage account $StorageAccount with all exported data. Continue? [y/N]"
   } else {
@@ -124,7 +125,7 @@ function Invoke-PreflightBillingExports {
   $removesStorage = -not $ExistingExport -and -not $KeepStorage
 
   if (-not $ExistingExport) {
-    Assert-BillingActions "FOCUS cost export" @('Microsoft.CostManagement/exports/read', 'Microsoft.CostManagement/exports/delete')
+    Assert-BillingAccountRole "FOCUS cost export"
   }
 
   if (Test-ResourceExists $ExportStorageAccountId) {
@@ -153,7 +154,7 @@ function Invoke-Preflight {
     Assert-ServicePrincipalManagement "Service principal" $ServicePrincipalObjectId
     Assert-ManagementGroupRolePermissions @('Microsoft.Authorization/roleAssignments/read', 'Microsoft.Authorization/roleAssignments/delete')
     if (-not $SkipBillingAccess) {
-      Assert-BillingActions "Billing reader role" @('Microsoft.Billing/billingAccounts/billingRoleAssignments/delete')
+      Assert-BillingAccountRole "Billing reader role"
     }
   }
 
@@ -165,17 +166,21 @@ function Invoke-Preflight {
 # Removes the role assignments of a principal on a scope.
 function Remove-RoleAssignments {
   param([string]$Scope, [string]$Role, [string]$PrincipalId)
-  if (-not $PrincipalId) { return }
-  $assignments = @(Invoke-Az -AllowFailure -Arguments @(
-      'role', 'assignment', 'list',
-      '--assignee', $PrincipalId,
-      '--scope', $Scope,
-      '--role', $Role
-    ))
-  foreach ($assignment in $assignments) {
-    if (-not $assignment -or $assignment.scope -ne $Scope) { continue }
-    Invoke-AzMutation -Arguments @('role', 'assignment', 'delete', '--ids', $assignment.id) | Out-Null
+  $removedCount = 0
+  if ($PrincipalId) {
+    $assignments = @(Invoke-Az -AllowFailure -Arguments @(
+        'role', 'assignment', 'list',
+        '--assignee', $PrincipalId,
+        '--scope', $Scope,
+        '--role', $Role
+      ))
+    foreach ($assignment in $assignments) {
+      if (-not $assignment -or $assignment.scope -ne $Scope) { continue }
+      Invoke-AzMutation -Arguments @('role', 'assignment', 'delete', '--ids', $assignment.id) | Out-Null
+      $removedCount++
+    }
   }
+  if ($removedCount -eq 0) { Write-StepDetail "not found, skipping" }
 }
 
 # Removes the resource group, only if the setup script created it and it contains no other resources.
@@ -183,14 +188,14 @@ function Remove-ResourceGroup {
   Write-Step "Resource group $ResourceGroup"
   $group = Invoke-Az -Arguments @('group', 'show', '--name', $ResourceGroup) -AllowFailure
   if (-not $group -or -not $group.tags -or -not $group.tags.$VersionTagName) {
-    Write-Step "Resource group not found or not created by setup.ps1, skipping"
+    Write-StepDetail "not found or not created by setup.ps1, skipping"
     return
   }
 
   $resources = @(Invoke-Az -Arguments @('resource', 'list', '--resource-group', $ResourceGroup))
   $remainingResourceCount = @($resources | Where-Object { $_ -and $_.id -ne $ExportStorageAccountId }).Count
   if ($remainingResourceCount -ne 0) {
-    Write-Step "Resource group has $remainingResourceCount other resources, skipping"
+    Write-StepDetail "has $remainingResourceCount other resources, skipping"
     return
   }
 
@@ -215,30 +220,40 @@ function Remove-BillingExports {
   Remove-RoleAssignments -Scope $ExportStorageAccountId -Role 'Storage Blob Data Contributor' -PrincipalId $exportPrincipalId
 
   Write-Step "FOCUS cost export $ExportName"
-  if ($export) { Invoke-AzMutation -Arguments @('rest', '--method', 'DELETE', '--url', $exportUrl) | Out-Null }
-
-  if ($KeepStorage) {
-    Write-Step "Keeping storage account $StorageAccount"
-    return
+  if ($export) {
+    Invoke-AzMutation -Arguments @('rest', '--method', 'DELETE', '--url', $exportUrl) | Out-Null
+  } else {
+    Write-StepDetail "not found, skipping"
   }
 
   Write-Step "Storage account $StorageAccount"
-  if (Test-ResourceExists $ExportStorageAccountId) {
-    if (-not (Get-StorageAccountVersionTag)) {
-      Write-Step "Storage account not created by setup.ps1, skipping"
-      return
-    }
+  if ($KeepStorage) {
+    Write-StepDetail "kept because of -KeepStorage, skipping"
+    return
+  }
+  if (-not (Test-ResourceExists $ExportStorageAccountId)) {
+    Write-StepDetail "not found, skipping"
+  } elseif (-not (Get-StorageAccountVersionTag)) {
+    Write-StepDetail "not created by setup.ps1, skipping"
+    return
+  } else {
     Invoke-AzMutation -Arguments @('storage', 'account', 'delete', '--ids', $ExportStorageAccountId, '--yes') | Out-Null
   }
 
   Remove-ResourceGroup
 
-  Write-Step "Resource providers stay registered"
+  Write-Step "Resource providers"
+  Write-StepDetail "stay registered, skipping"
 }
 
 # Removes the billing reader role of Infracost on the billing account.
 function Remove-BillingAccess {
-  if ($SkipBillingAccess -or -not $ServicePrincipalObjectId) { return }
+  if ($SkipBillingAccess) { return }
+  Write-Step "Billing reader role on billing account $BillingAccountId"
+  if (-not $ServicePrincipalObjectId) {
+    Write-StepDetail "service principal not found, skipping"
+    return
+  }
 
   $billingAccountResourceId = "/providers/Microsoft.Billing/billingAccounts/$BillingAccountId"
   $roleDefinitionId = Get-BillingRoleDefinitionId
@@ -249,8 +264,10 @@ function Remove-BillingAccess {
   }
   $assignmentUrl = "$billingAccountResourceId/billingRoleAssignments/${assignmentName}?api-version=$BillingApiVersion"
 
-  Write-Step "Billing reader role on billing account $BillingAccountId"
-  if (-not (Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', $assignmentUrl) -AllowFailure)) { return }
+  if (-not (Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', $assignmentUrl) -AllowFailure)) {
+    Write-StepDetail "not found, skipping"
+    return
+  }
   Invoke-AzMutation -Arguments @('rest', '--method', 'DELETE', '--url', $assignmentUrl) | Out-Null
 }
 
@@ -266,8 +283,11 @@ function Remove-ManagementGroupRoles {
 
 # Removes the Infracost service principal from the tenant.
 function Remove-ServicePrincipal {
-  if (-not $ServicePrincipalObjectId) { return }
   Write-Step "Service principal for application $ClientId"
+  if (-not $ServicePrincipalObjectId) {
+    Write-StepDetail "not found, skipping"
+    return
+  }
   Invoke-AzMutation -Arguments @('ad', 'sp', 'delete', '--id', $ServicePrincipalObjectId) | Out-Null
 }
 

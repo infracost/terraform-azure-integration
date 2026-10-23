@@ -13,6 +13,10 @@ $EaRoleDefinitionId = '24f8edb6-1668-4659-b5e2-40bb5f3a7d7e'
 $McaAgreementType = 'MicrosoftCustomerAgreement'
 $McaRoleDefinitionId = '50000000-aaaa-bbbb-cccc-100000000002'
 
+# Billing account roles that allow you to assign billing roles and manage cost exports.
+$EaAdministratorRoleDefinitionId = '9f1983cb-2574-400c-87e9-34cf8e2280db'
+$McaOwnerRoleDefinitionId = '50000000-aaaa-bbbb-cccc-100000000000'
+
 # Directory roles and Microsoft Graph application permissions that allow you to manage the Infracost service principal.
 $GlobalAdministratorRoleTemplateId = '62e90394-69f5-4237-9190-012177145e10'
 $ApplicationAdministratorRoleTemplateId = '9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3'
@@ -62,6 +66,8 @@ $ExistingRootPath = ''
 $ExportStorageAccountId = ''
 $ExportContainer = ''
 $ExportRootPath = ''
+$PreflightPasses = New-Object System.Collections.Generic.List[string]
+$StepWritten = $false
 $PreflightFailures = New-Object System.Collections.Generic.List[string]
 $PreflightUnchecked = New-Object System.Collections.Generic.List[string]
 $TemporaryFiles = New-Object System.Collections.Generic.List[string]
@@ -69,7 +75,15 @@ $TemporaryFiles = New-Object System.Collections.Generic.List[string]
 # Writes a progress line to stderr.
 function Write-Step {
   param([string]$Message)
+  if ($script:StepWritten) { [Console]::Error.WriteLine() }
+  $script:StepWritten = $true
   [Console]::Error.WriteLine("==> $Message")
+}
+
+# Writes a detail line under the current step to stderr.
+function Write-StepDetail {
+  param([string]$Message)
+  [Console]::Error.WriteLine("  - $Message")
 }
 
 # Writes an error to stderr and stops the script.
@@ -361,6 +375,12 @@ function Get-StorageAccountVersionTag {
   if ($account -and $account.tags) { $account.tags.$VersionTagName } else { '' }
 }
 
+# Records a permission that the preflight confirmed.
+function Add-PreflightPass {
+  param([string]$Message)
+  $PreflightPasses.Add($Message)
+}
+
 # Records a permission that is missing.
 function Add-PreflightFailure {
   param([string]$Message)
@@ -405,31 +425,85 @@ function Assert-ArmActions {
     return
   }
   foreach ($action in $Actions) {
-    if (-not (Test-ArmActionAllowed $action $permissions.value)) {
+    if (Test-ArmActionAllowed $action $permissions.value) {
+      Add-PreflightPass "${Description}: $action on $Scope"
+    } else {
       Add-PreflightFailure "${Description}: $action on $Scope"
     }
   }
 }
 
-# Checks that the signed-in principal can do each billing action on the billing account.
-function Assert-BillingActions {
-  param([string]$Description, [string[]]$Actions)
-  $checkAccessUrl = "/providers/Microsoft.Billing/billingAccounts/$BillingAccountId/checkAccess?api-version=$BillingApiVersion"
-  $accessDecisions = Invoke-Az -AllowFailure -Arguments @('rest', '--method', 'POST', '--url', $checkAccessUrl) -Body @{
-    actions = @($Actions)
+# Gets the object ID of the signed-in principal.
+function Get-SignedInObjectId {
+  $callerPath = if ($SignedInPrincipalType -eq 'servicePrincipal') {
+    "$GraphUrl/servicePrincipals(appId='$SignedInPrincipalName')"
+  } else {
+    "$GraphUrl/me"
   }
-  if ($null -eq $accessDecisions) {
-    Add-UncheckedPermission "${Description}: cannot check access on billing account $BillingAccountId"
+  $caller = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', "${callerPath}?`$select=id") -AllowFailure
+  if ($caller) { $caller.id }
+}
+
+# Gets the billing agreement type from the arguments, or from the billing account if the arguments do not give it.
+function Get-BillingAgreementType {
+  if ($BillingAgreementType) { return $BillingAgreementType }
+  $billingAccountUrl = "/providers/Microsoft.Billing/billingAccounts/${BillingAccountId}?api-version=$BillingApiVersion"
+  $billingAccount = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', $billingAccountUrl) -AllowFailure
+  if ($null -eq $billingAccount) { return }
+  switch ($billingAccount.properties.agreementType) {
+    $EaAgreementType { 'EA' }
+    $McaAgreementType { 'MCA' }
+  }
+}
+
+# Gets the billing role definition IDs of a principal on the billing account, from all the pages.
+function Get-BillingRoleDefinitionId {
+  param([string]$PrincipalObjectId)
+  $pageUrl = "/providers/Microsoft.Billing/billingAccounts/$BillingAccountId/billingRoleAssignments?api-version=$BillingApiVersion"
+  $roleDefinitionIds = [System.Collections.Generic.List[string]]::new()
+  while ($pageUrl) {
+    $page = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', $pageUrl) -AllowFailure
+    if ($null -eq $page) { return $null }
+    foreach ($roleAssignment in @($page.value)) {
+      if ($roleAssignment.properties.principalId -eq $PrincipalObjectId) {
+        $roleDefinitionIds.Add($roleAssignment.properties.roleDefinitionId)
+      }
+    }
+    $pageUrl = $page.nextLink
+  }
+  , $roleDefinitionIds.ToArray()
+}
+
+# Checks that the signed-in principal has the billing account role that the billing steps need.
+function Assert-BillingAccountRole {
+  param([string]$Description)
+  switch (Get-BillingAgreementType) {
+    'EA' {
+      $requiredRoleDefinitionId = $EaAdministratorRoleDefinitionId
+      $requiredRoleName = 'Enterprise Administrator'
+    }
+    'MCA' {
+      $requiredRoleDefinitionId = $McaOwnerRoleDefinitionId
+      $requiredRoleName = 'Billing account owner'
+    }
+    default {
+      Add-UncheckedPermission "${Description}: cannot read the agreement type of billing account $BillingAccountId"
+      return
+    }
+  }
+  $callerObjectId = Get-SignedInObjectId
+  $callerRoleDefinitionIds = $null
+  if ($callerObjectId) {
+    $callerRoleDefinitionIds = Get-BillingRoleDefinitionId -PrincipalObjectId $callerObjectId
+  }
+  if ($null -eq $callerRoleDefinitionIds) {
+    Add-UncheckedPermission "${Description}: cannot read the billing role assignments on billing account $BillingAccountId"
     return
   }
-  foreach ($action in $Actions) {
-    $decision = @($accessDecisions) | Where-Object { $_.action -eq $action } | Select-Object -First 1
-    $accessDecision = if ($decision) { $decision.accessDecision } else { '' }
-    switch ($accessDecision) {
-      'Allowed' { }
-      'NotAllowed' { Add-PreflightFailure "${Description}: $action on billing account $BillingAccountId" }
-      default { Add-UncheckedPermission "${Description}: no access decision for $action on billing account $BillingAccountId" }
-    }
+  if (@($callerRoleDefinitionIds | Where-Object { $_ -like "*/$requiredRoleDefinitionId" }).Count -gt 0) {
+    Add-PreflightPass "${Description}: $requiredRoleName on billing account $BillingAccountId"
+  } else {
+    Add-PreflightFailure "${Description}: needs $requiredRoleName on billing account $BillingAccountId"
   }
 }
 
@@ -441,8 +515,14 @@ function Assert-ServicePrincipalManagement {
     $grants = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', "$callerPath/appRoleAssignments?`$select=appRoleId") -AllowFailure
     if ($null -ne $grants) {
       $grantedAppRoleIds = @($grants.value | ForEach-Object { $_.appRoleId })
-      if ($grantedAppRoleIds -contains $GraphApplicationReadWriteAllRoleId) { return }
-      if (-not $TargetObjectId -and $grantedAppRoleIds -contains $GraphApplicationReadWriteOwnedByRoleId) { return }
+      if ($grantedAppRoleIds -contains $GraphApplicationReadWriteAllRoleId) {
+        Add-PreflightPass "${Description}: Application.ReadWrite.All"
+        return
+      }
+      if (-not $TargetObjectId -and $grantedAppRoleIds -contains $GraphApplicationReadWriteOwnedByRoleId) {
+        Add-PreflightPass "${Description}: Application.ReadWrite.OwnedBy"
+        return
+      }
     }
   } else {
     $callerPath = "$GraphUrl/me"
@@ -455,14 +535,20 @@ function Assert-ServicePrincipalManagement {
     return
   }
   $roleTemplateIds = @($directoryRoles.value | ForEach-Object { $_.roleTemplateId })
-  if (@($roleTemplateIds | Where-Object { $ApplicationManagerRoleTemplateIds -contains $_ }).Count -gt 0) { return }
+  if (@($roleTemplateIds | Where-Object { $ApplicationManagerRoleTemplateIds -contains $_ }).Count -gt 0) {
+    Add-PreflightPass "${Description}: Application Administrator, Cloud Application Administrator or Global Administrator directory role"
+    return
+  }
 
   if ($TargetObjectId) {
-    $caller = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', "${callerPath}?`$select=id") -AllowFailure
+    $callerObjectId = Get-SignedInObjectId
     $ownersUrl = "$GraphUrl/servicePrincipals/$TargetObjectId/owners?`$select=id"
     $owners = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', $ownersUrl) -AllowFailure
     $ownerIds = @($owners.value | ForEach-Object { $_.id })
-    if ($caller -and $ownerIds -contains $caller.id) { return }
+    if ($callerObjectId -and $ownerIds -contains $callerObjectId) {
+      Add-PreflightPass "${Description}: owner of the service principal"
+      return
+    }
   }
 
   Add-PreflightFailure "${Description}: Application Administrator, Cloud Application Administrator or Global Administrator directory role, Application.ReadWrite.All, or ownership of the service principal"
@@ -478,6 +564,10 @@ function Assert-ManagementGroupRolePermissions {
 
 # Writes the preflight result. Stops if a permission is missing.
 function Write-PreflightReport {
+  if ($PreflightPasses.Count -gt 0) {
+    Write-Step "Preflight checks that passed:"
+    foreach ($item in $PreflightPasses) { [Console]::Error.WriteLine("  - $item") }
+  }
   if ($PreflightUnchecked.Count -gt 0) {
     Write-Step "Preflight could not check these items. The run can still fail on them:"
     foreach ($item in $PreflightUnchecked) { [Console]::Error.WriteLine("  - $item") }

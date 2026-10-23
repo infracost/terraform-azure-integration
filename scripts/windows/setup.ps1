@@ -186,14 +186,14 @@ function Invoke-Preflight {
   Assert-ServicePrincipalManagement "Service principal" $ServicePrincipalObjectId
   Assert-ManagementGroupRolePermissions @('Microsoft.Authorization/roleAssignments/read', 'Microsoft.Authorization/roleAssignments/write')
   if (-not $SkipBillingAccess) {
-    Assert-BillingActions "Billing reader role" @('Microsoft.Billing/billingAccounts/billingRoleAssignments/write')
+    Assert-BillingAccountRole "Billing reader role"
   }
 
   if (-not $SkipBillingExports -and $ExistingExport) {
     Invoke-PreflightExistingExport
   } elseif (-not $SkipBillingExports) {
     Invoke-PreflightBillingExportsStorage
-    Assert-BillingActions "FOCUS cost export" @('Microsoft.CostManagement/exports/read', 'Microsoft.CostManagement/exports/write')
+    Assert-BillingAccountRole "FOCUS cost export"
   }
 
   Write-PreflightReport

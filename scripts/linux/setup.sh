@@ -251,14 +251,13 @@ invoke_preflight() {
   assert_management_group_role_permissions \
     Microsoft.Authorization/roleAssignments/read Microsoft.Authorization/roleAssignments/write
   [ "$skip_billing_access" = true ] \
-    || assert_billing_actions "Billing reader role" Microsoft.Billing/billingAccounts/billingRoleAssignments/write
+    || assert_billing_account_role "Billing reader role"
 
   if [ "$skip_billing_exports" = false ] && [ -n "$existing_export" ]; then
     invoke_preflight_existing_export
   elif [ "$skip_billing_exports" = false ]; then
     invoke_preflight_billing_exports_storage
-    assert_billing_actions "FOCUS cost export" \
-      Microsoft.CostManagement/exports/read Microsoft.CostManagement/exports/write
+    assert_billing_account_role "FOCUS cost export"
   fi
 
   write_preflight_report

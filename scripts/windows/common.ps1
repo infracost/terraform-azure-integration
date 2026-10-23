@@ -13,6 +13,10 @@ $EaRoleDefinitionId = '24f8edb6-1668-4659-b5e2-40bb5f3a7d7e'
 $McaAgreementType = 'MicrosoftCustomerAgreement'
 $McaRoleDefinitionId = '50000000-aaaa-bbbb-cccc-100000000002'
 
+# Billing account roles that allow you to assign billing roles and manage cost exports.
+$EaAdministratorRoleDefinitionId = '9f1983cb-2574-400c-87e9-34cf8e2280db'
+$McaOwnerRoleDefinitionId = '50000000-aaaa-bbbb-cccc-100000000000'
+
 # Directory roles and Microsoft Graph application permissions that allow you to manage the Infracost service principal.
 $GlobalAdministratorRoleTemplateId = '62e90394-69f5-4237-9190-012177145e10'
 $ApplicationAdministratorRoleTemplateId = '9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3'
@@ -420,25 +424,44 @@ function Assert-ArmActions {
   }
 }
 
-# Checks that the signed-in principal can do each billing action on the billing account.
-function Assert-BillingActions {
-  param([string]$Description, [string[]]$Actions)
-  $checkAccessUrl = "/providers/Microsoft.Billing/billingAccounts/$BillingAccountId/checkAccess?api-version=$BillingApiVersion"
-  $accessDecisions = Invoke-Az -AllowFailure -Arguments @('rest', '--method', 'POST', '--url', $checkAccessUrl) -Body @{
-    actions = @($Actions)
+# Gets the object ID of the signed-in principal.
+function Get-SignedInObjectId {
+  $callerPath = if ($SignedInPrincipalType -eq 'servicePrincipal') {
+    "$GraphUrl/servicePrincipals(appId='$SignedInPrincipalName')"
+  } else {
+    "$GraphUrl/me"
   }
-  if ($null -eq $accessDecisions) {
-    Add-UncheckedPermission "${Description}: cannot check access on billing account $BillingAccountId"
+  $caller = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', "${callerPath}?`$select=id") -AllowFailure
+  if ($caller) { $caller.id }
+}
+
+# Checks that the signed-in principal has the billing account role that the billing steps need.
+function Assert-BillingAccountRole {
+  param([string]$Description)
+  if ($BillingAgreementType -eq 'EA') {
+    $requiredRoleDefinitionId = $EaAdministratorRoleDefinitionId
+    $requiredRoleName = 'Enterprise Administrator'
+  } else {
+    $requiredRoleDefinitionId = $McaOwnerRoleDefinitionId
+    $requiredRoleName = 'Billing account owner'
+  }
+  $callerObjectId = Get-SignedInObjectId
+  $roleAssignments = $null
+  if ($callerObjectId) {
+    $roleAssignmentsUrl = "/providers/Microsoft.Billing/billingAccounts/$BillingAccountId/billingRoleAssignments?api-version=$BillingApiVersion"
+    $roleAssignments = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', $roleAssignmentsUrl) -AllowFailure
+  }
+  if ($null -eq $roleAssignments) {
+    Add-UncheckedPermission "${Description}: cannot read the billing role assignments on billing account $BillingAccountId"
     return
   }
-  foreach ($action in $Actions) {
-    $decision = @($accessDecisions) | Where-Object { $_.action -eq $action } | Select-Object -First 1
-    $accessDecision = if ($decision) { $decision.accessDecision } else { '' }
-    switch ($accessDecision) {
-      'Allowed' { Add-PreflightPass "${Description}: $action on billing account $BillingAccountId" }
-      'NotAllowed' { Add-PreflightFailure "${Description}: $action on billing account $BillingAccountId" }
-      default { Add-UncheckedPermission "${Description}: no access decision for $action on billing account $BillingAccountId" }
-    }
+  $callerRoleDefinitionIds = @($roleAssignments.value |
+      Where-Object { $_.properties.principalId -eq $callerObjectId } |
+      ForEach-Object { $_.properties.roleDefinitionId })
+  if (@($callerRoleDefinitionIds | Where-Object { $_ -like "*/$requiredRoleDefinitionId" }).Count -gt 0) {
+    Add-PreflightPass "${Description}: $requiredRoleName on billing account $BillingAccountId"
+  } else {
+    Add-PreflightFailure "${Description}: needs $requiredRoleName on billing account $BillingAccountId"
   }
 }
 
@@ -476,11 +499,11 @@ function Assert-ServicePrincipalManagement {
   }
 
   if ($TargetObjectId) {
-    $caller = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', "${callerPath}?`$select=id") -AllowFailure
+    $callerObjectId = Get-SignedInObjectId
     $ownersUrl = "$GraphUrl/servicePrincipals/$TargetObjectId/owners?`$select=id"
     $owners = Invoke-Az -Arguments @('rest', '--method', 'GET', '--url', $ownersUrl) -AllowFailure
     $ownerIds = @($owners.value | ForEach-Object { $_.id })
-    if ($caller -and $ownerIds -contains $caller.id) {
+    if ($callerObjectId -and $ownerIds -contains $callerObjectId) {
       Add-PreflightPass "${Description}: owner of the service principal"
       return
     }

@@ -124,7 +124,7 @@ function Invoke-PreflightBillingExports {
   $removesStorage = -not $ExistingExport -and -not $KeepStorage
 
   if (-not $ExistingExport) {
-    Assert-BillingActions "FOCUS cost export" @('Microsoft.CostManagement/exports/read', 'Microsoft.CostManagement/exports/delete')
+    Assert-BillingAccountRole "FOCUS cost export"
   }
 
   if (Test-ResourceExists $ExportStorageAccountId) {
@@ -153,7 +153,7 @@ function Invoke-Preflight {
     Assert-ServicePrincipalManagement "Service principal" $ServicePrincipalObjectId
     Assert-ManagementGroupRolePermissions @('Microsoft.Authorization/roleAssignments/read', 'Microsoft.Authorization/roleAssignments/delete')
     if (-not $SkipBillingAccess) {
-      Assert-BillingActions "Billing reader role" @('Microsoft.Billing/billingAccounts/billingRoleAssignments/delete')
+      Assert-BillingAccountRole "Billing reader role"
     }
   }
 

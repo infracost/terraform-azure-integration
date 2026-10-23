@@ -182,7 +182,7 @@ invoke_preflight_billing_exports() {
   [ -n "$existing_export" ] || [ "$keep_storage" = true ] || removes_storage=true
 
   [ -n "$existing_export" ] \
-    || assert_billing_actions "FOCUS cost export" Microsoft.CostManagement/exports/read Microsoft.CostManagement/exports/delete
+    || assert_billing_account_role "FOCUS cost export"
 
   if test_resource_exists "$export_storage_account_id"; then
     assert_arm_actions "$export_storage_account_id" "Billing exports storage roles" \
@@ -210,7 +210,7 @@ invoke_preflight() {
     assert_management_group_role_permissions \
       Microsoft.Authorization/roleAssignments/read Microsoft.Authorization/roleAssignments/delete
     [ "$skip_billing_access" = true ] \
-      || assert_billing_actions "Billing reader role" Microsoft.Billing/billingAccounts/billingRoleAssignments/delete
+      || assert_billing_account_role "Billing reader role"
   fi
 
   [ "$skip_billing_exports" = true ] || invoke_preflight_billing_exports

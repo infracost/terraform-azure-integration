@@ -15,6 +15,10 @@ EA_ROLE_DEFINITION_ID="24f8edb6-1668-4659-b5e2-40bb5f3a7d7e"
 MCA_AGREEMENT_TYPE="MicrosoftCustomerAgreement"
 MCA_ROLE_DEFINITION_ID="50000000-aaaa-bbbb-cccc-100000000002"
 
+# Billing account roles that allow you to assign billing roles and manage cost exports.
+EA_ADMINISTRATOR_ROLE_DEFINITION_ID="9f1983cb-2574-400c-87e9-34cf8e2280db"
+MCA_OWNER_ROLE_DEFINITION_ID="50000000-aaaa-bbbb-cccc-100000000000"
+
 # Directory roles and Microsoft Graph application permissions that allow you to manage the Infracost service principal.
 GLOBAL_ADMINISTRATOR_ROLE_TEMPLATE_ID="62e90394-69f5-4237-9190-012177145e10"
 APPLICATION_ADMINISTRATOR_ROLE_TEMPLATE_ID="9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3"
@@ -373,28 +377,36 @@ assert_arm_actions() {
   done
 }
 
-# Checks that the signed-in principal can do each billing action on the billing account.
-assert_billing_actions() {
-  local description="$1" action actions_json="" access_decisions access_decision
-  shift
-  for action in "$@"; do
-    actions_json="${actions_json:+${actions_json}, }$(json_string "$action")"
-  done
-  if ! access_decisions="$(az rest --method POST \
-    --url "/providers/Microsoft.Billing/billingAccounts/${billing_account_id}/checkAccess?api-version=${BILLING_API_VERSION}" \
-    --body "{ \"actions\": [${actions_json}] }" \
-    --query "[].join('|', [action, accessDecision])" -o tsv 2>/dev/null)"; then
-    add_unchecked_permission "${description}: cannot check access on billing account ${billing_account_id}"
+# Gets the object ID of the signed-in principal.
+get_signed_in_object_id() {
+  local caller_path="${GRAPH_URL}/me"
+  [ "$signed_in_principal_type" != servicePrincipal ] \
+    || caller_path="${GRAPH_URL}/servicePrincipals(appId='${signed_in_principal_name}')"
+  az rest --method GET --url "${caller_path}?\$select=id" --query id -o tsv 2>/dev/null || true
+}
+
+# Checks that the signed-in principal has the billing account role that the billing steps need.
+assert_billing_account_role() {
+  local description="$1" required_role_definition_id required_role_name caller_object_id role_definition_ids
+  if [ "$billing_agreement_type" = EA ]; then
+    required_role_definition_id="$EA_ADMINISTRATOR_ROLE_DEFINITION_ID"
+    required_role_name="Enterprise Administrator"
+  else
+    required_role_definition_id="$MCA_OWNER_ROLE_DEFINITION_ID"
+    required_role_name="Billing account owner"
+  fi
+  caller_object_id="$(get_signed_in_object_id)"
+  if [ -z "$caller_object_id" ] || ! role_definition_ids="$(az rest --method GET \
+    --url "/providers/Microsoft.Billing/billingAccounts/${billing_account_id}/billingRoleAssignments?api-version=${BILLING_API_VERSION}" \
+    --query "value[?properties.principalId=='${caller_object_id}'].properties.roleDefinitionId" -o tsv 2>/dev/null)"; then
+    add_unchecked_permission "${description}: cannot read the billing role assignments on billing account ${billing_account_id}"
     return 0
   fi
-  for action in "$@"; do
-    access_decision="$(awk -F'|' -v action="$action" 'tolower($1) == tolower(action) { print $2 }' <<<"$access_decisions")"
-    case "$access_decision" in
-      Allowed) add_preflight_pass "${description}: ${action} on billing account ${billing_account_id}" ;;
-      NotAllowed) add_preflight_failure "${description}: ${action} on billing account ${billing_account_id}" ;;
-      *) add_unchecked_permission "${description}: no access decision for ${action} on billing account ${billing_account_id}" ;;
-    esac
-  done
+  if grep -qi "/${required_role_definition_id}\$" <<<"$role_definition_ids"; then
+    add_preflight_pass "${description}: ${required_role_name} on billing account ${billing_account_id}"
+  else
+    add_preflight_failure "${description}: needs ${required_role_name} on billing account ${billing_account_id}"
+  fi
 }
 
 # Checks that the signed-in principal can create or change the Infracost service principal.
@@ -429,7 +441,7 @@ assert_service_principal_management() {
   fi
 
   if [ -n "$target_object_id" ]; then
-    caller_object_id="$(az rest --method GET --url "${caller_path}?\$select=id" --query id -o tsv 2>/dev/null || true)"
+    caller_object_id="$(get_signed_in_object_id)"
     owner_ids="$(az rest --method GET --url "${GRAPH_URL}/servicePrincipals/${target_object_id}/owners?\$select=id" \
       --query "value[].id" -o tsv 2>/dev/null || true)"
     if [ -n "$caller_object_id" ] && test_lines_contain_any "$owner_ids" "$caller_object_id"; then

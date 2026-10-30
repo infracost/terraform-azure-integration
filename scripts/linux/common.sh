@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Version of the scripts. Set on each Azure item that the scripts create.
-SCRIPT_VERSION="0.5.0" # x-release-please-version
+SCRIPT_VERSION="0.6.0" # x-release-please-version
 
 # API versions and endpoints of the Azure REST APIs.
 BILLING_API_VERSION="2024-04-01"

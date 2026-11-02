@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/infracost/terraform-azure-integration/compare/v0.6.0...v0.6.1) (2026-11-02)
+
+
+### Documentation
+
+* add early access banner and docs link to README ([#22](https://github.com/infracost/terraform-azure-integration/issues/22)) ([746245f](https://github.com/infracost/terraform-azure-integration/commit/746245f18d28e3a9ac852c2c89f54c2ad501d158))
+
 ## [0.6.0](https://github.com/infracost/terraform-azure-integration/compare/v0.5.0...v0.6.0) (2026-10-23)
 
 

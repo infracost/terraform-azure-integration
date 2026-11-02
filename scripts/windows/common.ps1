@@ -1,5 +1,5 @@
 # Version of the scripts. Set on each Azure item that the scripts create.
-$ScriptVersion = '0.6.0' # x-release-please-version
+$ScriptVersion = '0.6.1' # x-release-please-version
 
 # API versions and endpoints of the Azure REST APIs.
 $BillingApiVersion = '2024-04-01'
